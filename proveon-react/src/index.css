@@ -1,0 +1,13 @@
+/* Reset and normalize */
+@import './styles/design-system.css';
+
+/* Override any old default vite styles */
+#root {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  text-align: left !important;
+  border-inline: none !important;
+  min-height: 100vh !important;
+  display: block !important;
+}

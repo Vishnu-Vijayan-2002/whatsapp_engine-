@@ -1,0 +1,84 @@
+.dash-table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.dash-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.dash-data-table th {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-weight: 800;
+  text-align: left;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+  white-space: nowrap;
+}
+
+.dash-data-table th:first-child {
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.dash-data-table th:last-child {
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.dash-data-table td {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-main);
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.dash-data-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.dash-data-table tbody tr:hover {
+  background: var(--bg-input);
+}
+
+/* Status Pills */
+.status-pill {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.status-pill.active {
+  background: rgba(0, 182, 155, 0.12);
+  color: #00B69B;
+}
+
+.status-pill.pending {
+  background: rgba(255, 159, 67, 0.14);
+  color: #FF9F43;
+}
+
+.status-pill.suspended {
+  background: rgba(239, 56, 38, 0.14);
+  color: #EF3826;
+}
+
+/* Plan Tag */
+.plan-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+}

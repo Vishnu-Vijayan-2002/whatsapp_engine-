@@ -1,0 +1,178 @@
+.dashstack-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.dash-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 4 KPI Grid */
+.dash-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 1200px) {
+  .dash-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .dash-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kpi-dash-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: 22px 24px;
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kpi-dash-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+}
+
+.kpi-dash-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.kpi-dash-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kpi-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.kpi-number {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.5px;
+}
+
+.kpi-icon-bubble {
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpi-icon-bubble.purple {
+  background: rgba(130, 128, 255, 0.14);
+  color: #8280FF;
+}
+
+.kpi-icon-bubble.yellow {
+  background: rgba(254, 197, 61, 0.16);
+  color: #FEC53D;
+}
+
+.kpi-icon-bubble.green {
+  background: rgba(74, 217, 145, 0.16);
+  color: #4AD991;
+}
+
+.kpi-icon-bubble.orange {
+  background: rgba(255, 144, 102, 0.16);
+  color: #FF9066;
+}
+
+/* Trends */
+.kpi-trend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.trend-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 800;
+}
+
+.trend-stat.positive {
+  color: var(--success);
+}
+
+.trend-stat.negative {
+  color: var(--danger);
+}
+
+.trend-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Sales Details Chart Container */
+.sales-chart-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.chart-header-row,
+.deals-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chart-filter-select select,
+.deals-filter-select select {
+  padding: 8px 16px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.chart-filter-select select:focus,
+.deals-filter-select select:focus {
+  border-color: var(--primary);
+}
+
+.chart-canvas-wrapper {
+  height: 340px;
+  width: 100%;
+  position: relative;
+}
+
+/* Deals Section */
+.deals-table-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
