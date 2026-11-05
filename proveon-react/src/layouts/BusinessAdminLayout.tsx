@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTenant } from '../context/TenantContext';
+import { CreditTopUpModal } from '../components/CreditTopUpModal';
 import '../styles/design-system.css';
 import '../components/Sidebar.css';
 import '../components/Header.css';
@@ -84,7 +85,7 @@ const BusinessAdminLayout: React.FC<{ children: React.ReactNode }> = ({ children
                     <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                   </svg>
                 </div>
-                <span className="sidebar-text">Clients & Visits</span>
+                <span className="sidebar-text">Clients & Bookings</span>
               </NavLink>
             </li>
 
@@ -100,7 +101,7 @@ const BusinessAdminLayout: React.FC<{ children: React.ReactNode }> = ({ children
                     <polyline points="21 15 16 10 5 21"></polyline>
                   </svg>
                 </div>
-                <span className="sidebar-text">Media & X-Rays</span>
+                <span className="sidebar-text">Documents & Media</span>
               </NavLink>
             </li>
 
@@ -115,6 +116,21 @@ const BusinessAdminLayout: React.FC<{ children: React.ReactNode }> = ({ children
                   </svg>
                 </div>
                 <span className="sidebar-text">WhatsApp Flow</span>
+              </NavLink>
+            </li>
+
+            <li>
+              <NavLink
+                to="/app/settings"
+                className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+              >
+                <div className="sidebar-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  </svg>
+                </div>
+                <span className="sidebar-text">Settings & Profile</span>
               </NavLink>
             </li>
           </ul>
@@ -270,59 +286,13 @@ const BusinessAdminLayout: React.FC<{ children: React.ReactNode }> = ({ children
         </div>
       )}
 
-      {/* Insufficient Credits / Recharge Modal */}
-      {rechargeModalOpen && (
-        <div className="modal-overlay" onClick={() => setRechargeModalOpen(false)}>
-          <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(239, 56, 38, 0.14)', color: '#EF3826', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                  </svg>
-                </div>
-                <h3 className="modal-title">Insufficient Credit Balance</h3>
-              </div>
-              <button className="modal-close-btn" onClick={() => setRechargeModalOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div style={{ background: 'var(--bg-input)', padding: '16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Current Balance:</span>
-                  <strong style={{ fontSize: '16px', color: balance <= 0 ? '#EF3826' : '#FF9F43' }}>
-                    {balance.toFixed(2)} cr
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  <span>Low Balance Threshold:</span>
-                  <span>{tenant?.credit_wallet?.low_balance_threshold ?? 50} cr</span>
-                </div>
-              </div>
-
-              <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-                {balance <= 0
-                  ? 'Your wallet balance has reached 0.00 cr. Automated WhatsApp replies, patient media uploads, and database writes have been temporarily paused until new credits are allocated.'
-                  : 'Your business credit wallet is running low. Please contact your Proveon platform administrator to top up your balance.'}
-              </p>
-
-              <div style={{ background: 'var(--primary-light)', padding: '12px 14px', borderRadius: 'var(--radius-sm)', fontSize: '12.5px', color: 'var(--primary)' }}>
-                <strong>Support Contact:</strong> Email <code>support@proveon.io</code> or your account executive for immediate quota extension.
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-primary-action" onClick={() => setRechargeModalOpen(false)}>
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Business Admin Credit Top-Up & Reconciliation Modal */}
+      <CreditTopUpModal
+        isOpen={rechargeModalOpen}
+        onClose={() => setRechargeModalOpen(false)}
+        tenant={tenant}
+        tenantId={tenant?.id || ''}
+      />
     </div>
   );
 };

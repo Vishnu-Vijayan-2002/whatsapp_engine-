@@ -6,8 +6,11 @@ import {
   updateDoc,
   getDocs,
   query,
+  where,
   orderBy,
   limit,
+  runTransaction,
+  writeBatch,
   serverTimestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -26,6 +29,12 @@ import {
   type WhatsAppNodeFlow,
   type CapturedFlowSubmission,
   type WhatsAppSessionState,
+  type BookingSlotDoc,
+  type BookingSlotStatus,
+  type BookSlotResult,
+  type NextAvailableDateResult,
+  type BookingDateDoc,
+  type CreditTopUpRequest,
 } from '../types';
 
 export class InsufficientCreditsError extends Error {
@@ -58,6 +67,8 @@ const STORAGE_KEYS = {
   CAPTURED_SUBMISSIONS: 'proveon_captured_submissions_store',
   NODE_FLOWS: 'proveon_node_flows_store',
   SESSIONS: 'proveon_wa_sessions_store',
+  BOOKING_SLOTS: 'proveon_booking_slots_store',
+  CREDIT_REQUESTS: 'proveon_credit_requests_store',
 };
 
 type Listener<T> = (data: T) => void;
@@ -72,6 +83,7 @@ class ReactiveStore {
   private whatsappConfigListeners = new Set<Listener<Record<string, WhatsAppAutomationConfig>>>();
   private capturedListeners = new Set<Listener<CapturedFlowSubmission[]>>();
   private nodeFlowListeners = new Set<Listener<Record<string, WhatsAppNodeFlow>>>();
+  private creditRequestsListeners = new Set<Listener<CreditTopUpRequest[]>>();
 
   private tenants: Tenant[] = [];
   private auditLogs: UsageAuditLog[] = [];
@@ -83,6 +95,8 @@ class ReactiveStore {
   private capturedSubmissions: CapturedFlowSubmission[] = [];
   private nodeFlows: Record<string, WhatsAppNodeFlow> = {};
   private sessions: Record<string, WhatsAppSessionState> = {};
+  private bookingSlots: Record<string, Record<string, BookingSlotDoc[]>> = {};
+  private creditRequests: CreditTopUpRequest[] = [];
 
   constructor() {
     this.loadFromStorage();
@@ -124,6 +138,12 @@ class ReactiveStore {
 
       const sessRaw = localStorage.getItem(STORAGE_KEYS.SESSIONS);
       if (sessRaw) this.sessions = JSON.parse(sessRaw);
+
+      const slotsRaw = localStorage.getItem(STORAGE_KEYS.BOOKING_SLOTS);
+      if (slotsRaw) this.bookingSlots = JSON.parse(slotsRaw);
+
+      const creditReqRaw = localStorage.getItem(STORAGE_KEYS.CREDIT_REQUESTS);
+      if (creditReqRaw) this.creditRequests = JSON.parse(creditReqRaw);
     } catch (e) {
       console.warn('Storage read failed, using memory state', e);
     }
@@ -141,9 +161,49 @@ class ReactiveStore {
       localStorage.setItem(STORAGE_KEYS.CAPTURED_SUBMISSIONS, JSON.stringify(this.capturedSubmissions.slice(0, 300)));
       localStorage.setItem(STORAGE_KEYS.NODE_FLOWS, JSON.stringify(this.nodeFlows));
       localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(this.sessions));
+      localStorage.setItem(STORAGE_KEYS.BOOKING_SLOTS, JSON.stringify(this.bookingSlots));
+      localStorage.setItem(STORAGE_KEYS.CREDIT_REQUESTS, JSON.stringify(this.creditRequests.slice(0, 200)));
     } catch (e) {
       console.warn('Storage write failed', e);
     }
+  }
+
+  public getBookingSlots(tenantId: string, dateStr: string): BookingSlotDoc[] {
+    return this.bookingSlots[tenantId]?.[dateStr] || [];
+  }
+
+  public setBookingSlots(tenantId: string, dateStr: string, slots: BookingSlotDoc[]) {
+    if (!this.bookingSlots[tenantId]) this.bookingSlots[tenantId] = {};
+    this.bookingSlots[tenantId][dateStr] = slots;
+    this.persist();
+  }
+
+  public bookSlotLocal(
+    tenantId: string,
+    dateStr: string,
+    slotId: string,
+    customerDetails: { customer_phone: string; customer_name?: string; service?: string }
+  ): BookSlotResult {
+    const slots = [...this.getBookingSlots(tenantId, dateStr)];
+    const target = slots.find((s) => s.id === slotId || s.time.toLowerCase() === slotId.toLowerCase());
+    if (!target) {
+      return { success: false, reason: 'SLOT_NOT_FOUND', message: `Slot ${slotId} not found.` };
+    }
+    if (target.status !== 'available') {
+      return {
+        success: false,
+        reason: 'SLOT_ALREADY_TAKEN',
+        message: `Slot ${target.time} is already booked by another customer.`,
+        slotData: target,
+      };
+    }
+    target.status = 'booked';
+    target.booked_by = customerDetails.customer_phone;
+    target.booked_at = new Date().toISOString();
+    target.customer_name = customerDetails.customer_name || 'Valued Client';
+    target.service = customerDetails.service || 'Confirmed Appointment';
+    this.setBookingSlots(tenantId, dateStr, slots);
+    return { success: true, slotData: target };
   }
 
   public populateDefaultMocks() {
@@ -158,6 +218,16 @@ class ReactiveStore {
         admin_name: 'Dr. Sarah Mitchell',
         admin_email: 'sarah.mitchell@apexaesthetics.com',
         admin_phone: '+1 (555) 234-5678',
+        address: '450 Lexington Ave, Suite 1400, New York, NY 10017',
+        operating_hours: 'Mon - Fri: 8:30 AM - 6:30 PM | Sat: 9:00 AM - 2:00 PM',
+        contact_phone: '+1 (555) 234-5678',
+        description: 'Premier integrated cosmetic & medical dermatology practice providing state-of-the-art aesthetic consultations and bespoke wellness treatment protocols.',
+        website_url: 'https://apexaesthetics.com',
+        logo_url: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?w=300&auto=format&fit=crop&q=60',
+        social_links: {
+          instagram: '@apexaesthetics',
+          linkedin: 'company/apex-aesthetics',
+        },
         credit_wallet: {
           balance: 1420.50,
           lifetime_granted: 3500.00,
@@ -321,7 +391,7 @@ class ReactiveStore {
         tenant_id: 'ten-mehta-03',
         business_name: 'Dr. Mehta Dental & Implantology',
         actor: { userId: 'media-uploader', role: 'TENANT_ADMIN' },
-        operation: { action_code: 'STORAGE_INGEST_MB', description: 'Patient panoramic dental X-Ray ingested (14MB)' },
+        operation: { action_code: 'STORAGE_INGEST_MB', description: 'Client project contract & design media ingested (14MB)' },
         metrics: { executionTimeMs: 148, dbReads: 1, dbWrites: 2, storageMb: 14 },
         financials: { credits_deducted: 1.40, balance_prior: 39.80, balance_post: 38.40 },
         timestamp: now - 1000 * 60 * 42,
@@ -368,93 +438,231 @@ class ReactiveStore {
         id: 'cust-001',
         tenant_id: 'ten-apex-01',
         full_name: 'Sophia Vance',
+        name: 'Sophia Vance',
         phone: '+1 (555) 789-0123',
-        email: 'sophia.v@gmail.com',
-        service_interest: 'Comprehensive Consultation',
-        notes: 'Sensitive skin. Prefers afternoon appointments.',
-        created_at: now - 1000 * 60 * 60 * 72,
+        phone_number: '+1 (555) 789-0123',
+        email: 'sophia.vance@company.com',
+        service_interest: 'Executive Strategic Consultation',
+        status: 'vip',
+        total_bookings: 6,
+        total_completed_visits: 5,
+        last_interacted_at: now - 1000 * 60 * 35, // 35 min ago via WhatsApp
+        notes: 'VIP Client. Prefers morning appointments and quarterly reviews.',
+        created_at: now - 1000 * 60 * 60 * 24 * 75,
       },
       {
         id: 'cust-002',
         tenant_id: 'ten-apex-01',
         full_name: 'Liam Rodriguez',
+        name: 'Liam Rodriguez',
         phone: '+1 (555) 321-6549',
-        email: 'liam.r@outlook.com',
-        service_interest: 'HydraFacial Deluxe',
-        notes: 'VIP Client. Referred by Dr. Chen.',
-        created_at: now - 1000 * 60 * 60 * 48,
+        phone_number: '+1 (555) 321-6549',
+        email: 'liam.rodriguez@techventures.io',
+        service_interest: 'Quarterly Advisory Session',
+        status: 'active',
+        total_bookings: 4,
+        total_completed_visits: 3,
+        last_interacted_at: now - 1000 * 60 * 120, // 2 hours ago
+        notes: 'Key contact for enterprise account. Receptive to WhatsApp automated reminders.',
+        created_at: now - 1000 * 60 * 60 * 24 * 45,
       },
       {
         id: 'cust-003',
         tenant_id: 'ten-apex-01',
         full_name: 'Emma Watson-Lee',
+        name: 'Emma Watson-Lee',
         phone: '+1 (555) 654-7890',
-        email: 'emma.lee@modernart.com',
-        service_interest: 'Microdermabrasion & Peels',
-        notes: 'Regular monthly patient.',
-        created_at: now - 1000 * 60 * 60 * 24,
+        phone_number: '+1 (555) 654-7890',
+        email: 'emma.lee@creativeguild.org',
+        service_interest: 'Onboarding & Comprehensive Review',
+        status: 'active',
+        total_bookings: 3,
+        total_completed_visits: 2,
+        last_interacted_at: now - 1000 * 60 * 45,
+        notes: 'Regular scheduled monthly client. Always confirms promptly.',
+        created_at: now - 1000 * 60 * 60 * 24 * 30,
       },
       {
         id: 'cust-004',
-        tenant_id: 'ten-luxe-02',
-        full_name: 'Isabella Rossi',
+        tenant_id: 'ten-apex-01',
+        full_name: 'Marcus Thorne',
+        name: 'Marcus Thorne',
         phone: '+1 (555) 432-8765',
-        email: 'isabella.rossi@fashion.org',
-        service_interest: 'Balayage & Keratin Infusion',
-        notes: 'Allergic to ammonia dyes.',
-        created_at: now - 1000 * 60 * 60 * 36,
+        phone_number: '+1 (555) 432-8765',
+        email: 'marcus.thorne@summitglobal.com',
+        service_interest: 'Standard Business Advisory',
+        status: 'active',
+        total_bookings: 2,
+        total_completed_visits: 1,
+        last_interacted_at: now - 1000 * 60 * 60 * 8,
+        notes: 'New client onboarded last week.',
+        created_at: now - 1000 * 60 * 60 * 24 * 14,
       },
       {
         id: 'cust-005',
-        tenant_id: 'ten-mehta-03',
-        full_name: 'David Kim',
+        tenant_id: 'ten-apex-01',
+        full_name: 'Elena Rostova',
+        name: 'Elena Rostova',
         phone: '+1 (555) 901-2345',
-        email: 'david.kim@techfirm.co',
-        service_interest: 'Dental Implant Consultation',
-        notes: 'Needs panoramic X-Ray review.',
-        created_at: now - 1000 * 60 * 60 * 12,
+        phone_number: '+1 (555) 901-2345',
+        email: 'elena.rostova@designlab.co',
+        service_interest: 'Project Review & Strategy Session',
+        status: 'vip',
+        total_bookings: 8,
+        total_completed_visits: 7,
+        last_interacted_at: now - 1000 * 60 * 60 * 26,
+        notes: 'Long-standing VIP client. High engagement.',
+        created_at: now - 1000 * 60 * 60 * 24 * 120,
+      },
+      {
+        id: 'cust-006',
+        tenant_id: 'ten-luxe-02',
+        full_name: 'Isabella Rossi',
+        name: 'Isabella Rossi',
+        phone: '+1 (555) 432-1199',
+        email: 'isabella.rossi@fashion.org',
+        service_interest: 'Premium Styling Consultation',
+        status: 'active',
+        total_bookings: 2,
+        total_completed_visits: 2,
+        last_interacted_at: now - 1000 * 60 * 60 * 36,
+        notes: 'Prefers evening appointments.',
+        created_at: now - 1000 * 60 * 60 * 36,
       },
     ];
 
+    const todayIso = new Date(now).toISOString().split('T')[0];
+    const yesterdayIso = new Date(now - 86400000).toISOString().split('T')[0];
+    const tomorrowIso = new Date(now + 86400000).toISOString().split('T')[0];
+    const twoDaysLaterIso = new Date(now + 86400000 * 2).toISOString().split('T')[0];
+    const pastWeekIso = new Date(now - 86400000 * 4).toISOString().split('T')[0];
+
     this.appointments = [
       {
-        id: 'appt-001',
+        id: 'appt-101',
         tenant_id: 'ten-apex-01',
         customer_id: 'cust-001',
+        client_id: 'cust-001',
         customer_name: 'Sophia Vance',
+        client_name: 'Sophia Vance',
         customer_phone: '+1 (555) 789-0123',
-        service_name: 'Comprehensive Consultation',
-        date: new Date(now + 86400000).toISOString().split('T')[0],
-        time: '14:30',
-        status: 'CONFIRMED',
-        notes: 'Room 3 - Dr. Mitchell presiding',
-        created_at: now - 1000 * 60 * 60 * 6,
+        client_phone: '+1 (555) 789-0123',
+        service_name: 'Executive Strategic Consultation',
+        date: todayIso,
+        time: '10:30 AM',
+        duration_minutes: 45,
+        status: 'ATTENDED',
+        booking_source: 'whatsapp_bot',
+        notes: 'Session completed successfully. Next action items noted.',
+        created_at: now - 1000 * 60 * 60 * 24 * 2,
       },
       {
-        id: 'appt-002',
+        id: 'appt-102',
         tenant_id: 'ten-apex-01',
         customer_id: 'cust-002',
+        client_id: 'cust-002',
         customer_name: 'Liam Rodriguez',
+        client_name: 'Liam Rodriguez',
         customer_phone: '+1 (555) 321-6549',
-        service_name: 'HydraFacial Deluxe',
-        date: new Date(now + 86400000 * 2).toISOString().split('T')[0],
-        time: '11:00',
-        status: 'PENDING',
-        notes: 'Awaiting customer WhatsApp confirmation',
-        created_at: now - 1000 * 60 * 60 * 2,
+        client_phone: '+1 (555) 321-6549',
+        service_name: 'Quarterly Advisory Session',
+        date: todayIso,
+        time: '02:00 PM',
+        duration_minutes: 60,
+        status: 'CONFIRMED',
+        booking_source: 'whatsapp_bot',
+        notes: 'Confirmed via WhatsApp bot. Room A.',
+        created_at: now - 1000 * 60 * 60 * 18,
       },
       {
-        id: 'appt-003',
+        id: 'appt-103',
         tenant_id: 'ten-apex-01',
         customer_id: 'cust-003',
+        client_id: 'cust-003',
         customer_name: 'Emma Watson-Lee',
+        client_name: 'Emma Watson-Lee',
         customer_phone: '+1 (555) 654-7890',
-        service_name: 'Microdermabrasion & Peels',
-        date: new Date(now).toISOString().split('T')[0],
-        time: '16:00',
+        client_phone: '+1 (555) 654-7890',
+        service_name: 'Onboarding & Comprehensive Review',
+        date: todayIso,
+        time: '04:30 PM',
+        duration_minutes: 30,
         status: 'CONFIRMED',
-        notes: 'Check-in completed via WhatsApp',
-        created_at: now - 1000 * 60 * 45,
+        booking_source: 'admin_manual',
+        notes: 'Scheduled directly by admin desk.',
+        created_at: now - 1000 * 60 * 60 * 5,
+      },
+      {
+        id: 'appt-104',
+        tenant_id: 'ten-apex-01',
+        customer_id: 'cust-004',
+        client_id: 'cust-004',
+        customer_name: 'Marcus Thorne',
+        client_name: 'Marcus Thorne',
+        customer_phone: '+1 (555) 432-8765',
+        client_phone: '+1 (555) 432-8765',
+        service_name: 'Standard Business Advisory',
+        date: tomorrowIso,
+        time: '11:00 AM',
+        duration_minutes: 45,
+        status: 'CONFIRMED',
+        booking_source: 'whatsapp_bot',
+        notes: 'Automated 24h reminder queued.',
+        created_at: now - 1000 * 60 * 60 * 12,
+      },
+      {
+        id: 'appt-105',
+        tenant_id: 'ten-apex-01',
+        customer_id: 'cust-005',
+        client_id: 'cust-005',
+        customer_name: 'Elena Rostova',
+        client_name: 'Elena Rostova',
+        customer_phone: '+1 (555) 901-2345',
+        client_phone: '+1 (555) 901-2345',
+        service_name: 'Project Review & Strategy Session',
+        date: twoDaysLaterIso,
+        time: '01:30 PM',
+        duration_minutes: 60,
+        status: 'PENDING',
+        booking_source: 'whatsapp_bot',
+        notes: 'Slot reserved, pending customer confirmation.',
+        created_at: now - 1000 * 60 * 60 * 3,
+      },
+      {
+        id: 'appt-106',
+        tenant_id: 'ten-apex-01',
+        customer_id: 'cust-001',
+        client_id: 'cust-001',
+        customer_name: 'Sophia Vance',
+        client_name: 'Sophia Vance',
+        customer_phone: '+1 (555) 789-0123',
+        client_phone: '+1 (555) 789-0123',
+        service_name: 'Follow-up Consultation',
+        date: yesterdayIso,
+        time: '03:00 PM',
+        duration_minutes: 30,
+        status: 'ATTENDED',
+        booking_source: 'whatsapp_bot',
+        notes: 'Follow-up completed on schedule.',
+        created_at: now - 1000 * 60 * 60 * 48,
+      },
+      {
+        id: 'appt-107',
+        tenant_id: 'ten-apex-01',
+        customer_id: 'cust-002',
+        client_id: 'cust-002',
+        customer_name: 'Liam Rodriguez',
+        client_name: 'Liam Rodriguez',
+        customer_phone: '+1 (555) 321-6549',
+        client_phone: '+1 (555) 321-6549',
+        service_name: 'Introductory Discovery Call',
+        date: pastWeekIso,
+        time: '11:30 AM',
+        duration_minutes: 45,
+        status: 'ATTENDED',
+        booking_source: 'whatsapp_bot',
+        notes: 'Client attended via teleconference.',
+        created_at: now - 1000 * 60 * 60 * 24 * 7,
       },
     ];
 
@@ -462,34 +670,34 @@ class ReactiveStore {
       {
         id: 'med-001',
         tenant_id: 'ten-apex-01',
-        file_name: 'patient_pre_op_scan_vance.jpg',
-        file_type: 'image/jpeg',
-        file_size_mb: 8.4,
-        url: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=600&auto=format&fit=crop&q=60',
-        category: 'CLINIC_XRAY',
-        credits_metered: 0.84,
+        file_name: 'service_agreement_vance.pdf',
+        file_type: 'application/pdf',
+        file_size_mb: 3.2,
+        url: 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=600&auto=format&fit=crop&q=60',
+        category: 'CONTRACT',
+        credits_metered: 0.32,
         uploaded_at: now - 1000 * 60 * 60 * 20,
       },
       {
         id: 'med-002',
         tenant_id: 'ten-apex-01',
-        file_name: 'clinical_consent_signed_rodriguez.pdf',
+        file_name: 'project_brief_rodriguez.pdf',
         file_type: 'application/pdf',
         file_size_mb: 2.1,
         url: 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=600&auto=format&fit=crop&q=60',
-        category: 'CONSENT_FORM',
+        category: 'DOCUMENT',
         credits_metered: 0.21,
         uploaded_at: now - 1000 * 60 * 60 * 14,
       },
       {
         id: 'med-003',
         tenant_id: 'ten-apex-01',
-        file_name: 'post_treatment_glow_portfolio.jpg',
+        file_name: 'brand_presentation_portfolio.jpg',
         file_type: 'image/jpeg',
-        file_size_mb: 12.0,
+        file_size_mb: 8.0,
         url: 'https://images.unsplash.com/photo-1512290900672-1f41d3b0c538?w=600&auto=format&fit=crop&q=60',
         category: 'PORTFOLIO_IMAGE',
-        credits_metered: 1.20,
+        credits_metered: 0.80,
         uploaded_at: now - 1000 * 60 * 60 * 4,
       },
     ];
@@ -627,10 +835,60 @@ class ReactiveStore {
       },
     ];
 
+    this.creditRequests = [
+      {
+        id: 'cr-req-101',
+        tenant_id: 'ten-apex-01',
+        business_name: 'Apex Aesthetic Dermatology Clinic',
+        amount: 250,
+        payment_reference: 'WIRE-2026-APX-8812',
+        notes: 'Monthly bulk operational credits for automated WhatsApp consultation campaigns',
+        status: 'PENDING',
+        requested_by_email: 'sarah.mitchell@apexaesthetics.com',
+        requested_at: now - 1000 * 60 * 60 * 3,
+      },
+      {
+        id: 'cr-req-102',
+        tenant_id: 'ten-luxe-02',
+        business_name: 'Luxe Radiance Hair & Spa Salon',
+        amount: 500,
+        payment_reference: 'ACH-TRANS-44910',
+        notes: 'Prepaid quarterly credit pack',
+        status: 'APPROVED',
+        requested_by_email: 'elena@luxeradiance.com',
+        requested_at: now - 1000 * 60 * 60 * 48,
+        resolved_at: now - 1000 * 60 * 60 * 24,
+        resolved_by: 'super_admin_root',
+      },
+      {
+        id: 'cr-req-103',
+        tenant_id: 'ten-mehta-03',
+        business_name: 'Dr. Mehta Dental & Implantology',
+        amount: 100,
+        payment_reference: 'REF-PENDING-INVALID',
+        notes: 'Urgent emergency refill',
+        status: 'REJECTED',
+        requested_by_email: 'dr.mehta@mehtadental.org',
+        requested_at: now - 1000 * 60 * 60 * 72,
+        resolved_at: now - 1000 * 60 * 60 * 48,
+        resolved_by: 'super_admin_root',
+        rejection_reason: 'Unmatched transaction reference. Please re-submit with verified wire receipt.',
+      },
+    ];
+
     this.persist();
   }
 
   // Subscriptions
+  public subscribeCreditRequests(cb: Listener<CreditTopUpRequest[]>, tenantId?: string): () => void {
+    const wrappedListener: Listener<CreditTopUpRequest[]> = (list) => {
+      cb(tenantId ? list.filter((r) => r.tenant_id === tenantId) : list);
+    };
+    this.creditRequestsListeners.add(wrappedListener);
+    wrappedListener([...this.creditRequests]);
+    return () => this.creditRequestsListeners.delete(wrappedListener);
+  }
+
   public subscribeTenants(cb: Listener<Tenant[]>): () => void {
     this.tenantsListeners.add(cb);
     cb([...this.tenants]);
@@ -818,9 +1076,25 @@ class ReactiveStore {
     this.notifyCustomers();
   }
 
+  public updateCustomer(id: string, updates: Partial<Customer>) {
+    const idx = this.customers.findIndex((c) => c.id === id);
+    if (idx !== -1) {
+      this.customers[idx] = { ...this.customers[idx], ...updates };
+      this.notifyCustomers();
+    }
+  }
+
   public addAppointment(appt: Appointment) {
     this.appointments.unshift(appt);
     this.notifyAppointments();
+  }
+
+  public updateAppointment(id: string, updates: Partial<Appointment>) {
+    const idx = this.appointments.findIndex((a) => a.id === id);
+    if (idx !== -1) {
+      this.appointments[idx] = { ...this.appointments[idx], ...updates, updated_at: Date.now() };
+      this.notifyAppointments();
+    }
   }
 
   public addMedia(media: MediaFile) {
@@ -851,7 +1125,30 @@ class ReactiveStore {
     this.rateCardListeners.forEach((fn) => fn(copy));
   }
 
+  private notifyCreditRequests() {
+    this.persist();
+    const copy = [...this.creditRequests];
+    this.creditRequestsListeners.forEach((fn) => fn(copy));
+  }
+
   // Mutations
+  public getCreditRequests(tenantId?: string): CreditTopUpRequest[] {
+    return tenantId ? this.creditRequests.filter((r) => r.tenant_id === tenantId) : [...this.creditRequests];
+  }
+
+  public addCreditRequest(req: CreditTopUpRequest) {
+    this.creditRequests.unshift(req);
+    this.notifyCreditRequests();
+  }
+
+  public updateCreditRequest(id: string, updates: Partial<CreditTopUpRequest>) {
+    const idx = this.creditRequests.findIndex((r) => r.id === id);
+    if (idx !== -1) {
+      this.creditRequests[idx] = { ...this.creditRequests[idx], ...updates };
+      this.notifyCreditRequests();
+    }
+  }
+
   public getTenants(): Tenant[] {
     return [...this.tenants];
   }
@@ -1416,7 +1713,7 @@ export function translateActionCode(actionCode: ActionCode | string, description
       }
       return 'Saved Business Record';
     case 'STORAGE_INGEST_MB':
-      return 'Uploaded Portfolio / X-Ray Media';
+      return 'Uploaded Portfolio / Document Media';
     case 'WA_BOT_STATE_TRANS':
       return 'Automated WhatsApp Response Sent';
     case 'WA_INBOUND_PROCESS':
@@ -1424,7 +1721,7 @@ export function translateActionCode(actionCode: ActionCode | string, description
     case 'AUTOMATED_JOB_DISPATCH':
       return 'Scheduled Reminder Sent';
     case 'DB_READ_BURST':
-      return 'Patient History Lookup';
+      return 'Client Record Lookup';
     case 'MANUAL_TOPUP':
       return 'Admin Credit Grant';
     case 'MANUAL_ADJUSTMENT':
@@ -1700,6 +1997,213 @@ export async function createAppointmentWithMetering(
 }
 
 /**
+ * Updates an appointment's status (e.g. ATTENDED, NO_SHOW, CANCELLED, CONFIRMED)
+ * and updates client engagement statistics when attended.
+ */
+export async function updateAppointmentStatus(
+  tenantId: string,
+  appointmentId: string,
+  status: Appointment['status'],
+  notes?: string
+): Promise<Appointment | null> {
+  const appointments = reactiveStore.getAppointments(tenantId);
+  const target = appointments.find((a) => a.id === appointmentId);
+  if (!target) return null;
+
+  const updates: Partial<Appointment> = {
+    status,
+    ...(notes !== undefined ? { notes } : {}),
+    updated_at: Date.now(),
+  };
+
+  reactiveStore.updateAppointment(appointmentId, updates);
+
+  // If attended / completed, update client attendance stats
+  if ((status === 'ATTENDED' || status === 'COMPLETED') && (target.customer_id || target.client_id)) {
+    const cId = (target.customer_id || target.client_id)!;
+    const customer = reactiveStore.getCustomers(tenantId).find((c) => c.id === cId);
+    if (customer) {
+      reactiveStore.updateCustomer(cId, {
+        total_completed_visits: (customer.total_completed_visits || 0) + 1,
+        last_interacted_at: Date.now(),
+      });
+    }
+  }
+
+  // Also update live Firestore if configured
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      await updateDoc(doc(db, 'appointments', appointmentId), {
+        status,
+        ...(notes !== undefined ? { notes } : {}),
+        updated_at: serverTimestamp(),
+      });
+    } catch {
+      // background sync
+    }
+  }
+
+  return { ...target, ...updates };
+}
+
+/**
+ * Updates a customer/client's profile information or engagement statistics.
+ */
+export async function updateCustomerRecord(
+  tenantId: string,
+  customerId: string,
+  updates: Partial<Customer>
+): Promise<Customer | null> {
+  const customers = reactiveStore.getCustomers(tenantId);
+  const target = customers.find((c) => c.id === customerId);
+  if (!target) return null;
+
+  reactiveStore.updateCustomer(customerId, updates);
+
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      await updateDoc(doc(db, 'customers', customerId), {
+        ...updates,
+        updated_at: serverTimestamp(),
+      });
+    } catch {
+      // background sync
+    }
+  }
+
+  return { ...target, ...updates };
+}
+
+/**
+ * Admin Manual Booking & Slot Allocation:
+ * Books an appointment on behalf of an existing or new client directly with metering,
+ * updates client engagement counters, and marks the slot as taken.
+ */
+export async function bookManualAppointmentWithMetering(
+  tenantId: string,
+  bookingData: {
+    customer_id?: string;
+    customer_name: string;
+    customer_phone: string;
+    customer_email?: string;
+    service_name: string;
+    date: string;
+    time: string;
+    duration_minutes?: number;
+    notes?: string;
+  }
+): Promise<{ appointment: Appointment; customer: Customer; newBalance: number }> {
+  const rateCard = reactiveStore.getRateCard();
+  const cost = rateCard.DB_WRITE_MUTATION || 0.50;
+
+  const { newBalance } = await meterAndDeductCredits({
+    tenant_id: tenantId,
+    cost,
+    action_code: 'DB_WRITE_MUTATION',
+    friendly_desc: `Admin Manual Booking: ${bookingData.customer_name} (${bookingData.service_name})`,
+    reads: 1,
+    writes: 2,
+  });
+
+  const now = Date.now();
+  let clientObj: Customer;
+
+  // 1. Resolve or Create Client
+  const existingCustomers = reactiveStore.getCustomers(tenantId);
+  let matchedClient = bookingData.customer_id
+    ? existingCustomers.find((c) => c.id === bookingData.customer_id)
+    : existingCustomers.find(
+        (c) =>
+          c.phone === bookingData.customer_phone ||
+          c.phone.replace(/[^0-9]/g, '') === bookingData.customer_phone.replace(/[^0-9]/g, '')
+      );
+
+  if (matchedClient) {
+    const updatedBookings = (matchedClient.total_bookings || 0) + 1;
+    const clientUpdates: Partial<Customer> = {
+      total_bookings: updatedBookings,
+      last_interacted_at: now,
+      ...(bookingData.customer_email && !matchedClient.email ? { email: bookingData.customer_email } : {}),
+      ...(bookingData.service_name ? { service_interest: bookingData.service_name } : {}),
+    };
+    reactiveStore.updateCustomer(matchedClient.id, clientUpdates);
+    clientObj = { ...matchedClient, ...clientUpdates };
+  } else {
+    const newCustId = `cust-${now}-${Math.floor(100 + Math.random() * 900)}`;
+    clientObj = {
+      id: newCustId,
+      tenant_id: tenantId,
+      full_name: bookingData.customer_name,
+      name: bookingData.customer_name,
+      phone: bookingData.customer_phone,
+      phone_number: bookingData.customer_phone,
+      email: bookingData.customer_email || `${bookingData.customer_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@client.com`,
+      service_interest: bookingData.service_name,
+      status: 'active',
+      total_bookings: 1,
+      total_completed_visits: 0,
+      last_interacted_at: now,
+      notes: bookingData.notes || 'Created via Admin Manual Booking',
+      created_at: now,
+    };
+    reactiveStore.addCustomer(clientObj);
+  }
+
+  // 2. Create Appointment Entity
+  const apptId = `appt-${now}-${Math.floor(100 + Math.random() * 900)}`;
+  const newAppt: Appointment = {
+    id: apptId,
+    tenant_id: tenantId,
+    customer_id: clientObj.id,
+    client_id: clientObj.id,
+    customer_name: clientObj.full_name,
+    client_name: clientObj.full_name,
+    customer_phone: clientObj.phone,
+    client_phone: clientObj.phone,
+    service_name: bookingData.service_name,
+    date: bookingData.date,
+    time: bookingData.time,
+    duration_minutes: bookingData.duration_minutes || 45,
+    status: 'CONFIRMED',
+    booking_source: 'admin_manual',
+    notes: bookingData.notes || 'Manual booking via Admin Console',
+    created_at: now,
+    updated_at: now,
+  };
+
+  reactiveStore.addAppointment(newAppt);
+
+  // 3. Concurrency Slot Booking Sync
+  try {
+    await bookSlot(tenantId, bookingData.date, bookingData.time, {
+      customer_phone: clientObj.phone,
+      customer_name: clientObj.full_name,
+      service: bookingData.service_name,
+    });
+  } catch (err) {
+    console.warn('Slot booking sync in manual booking completed with fallback:', err);
+  }
+
+  // 4. Firestore Background Sync if Configured
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      setDoc(doc(db, 'appointments', apptId), {
+        ...newAppt,
+        created_at: serverTimestamp(),
+      }).catch(console.warn);
+      setDoc(doc(db, 'customers', clientObj.id), {
+        ...clientObj,
+        created_at: serverTimestamp(),
+      }).catch(console.warn);
+    } catch {
+      // background
+    }
+  }
+
+  return { appointment: newAppt, customer: clientObj, newBalance };
+}
+
+/**
  * Uploads a Media / File with dynamic STORAGE_INGEST_MB credit metering.
  */
 export async function uploadMediaWithMetering(
@@ -1723,7 +2227,7 @@ export async function uploadMediaWithMetering(
     tenant_id: tenantId,
     cost,
     action_code: 'STORAGE_INGEST_MB',
-    friendly_desc: `Uploaded Portfolio / X-Ray Media: ${fileData.file_name} (${fileData.file_size_mb.toFixed(1)}MB)`,
+    friendly_desc: `Uploaded Document / Media: ${fileData.file_name} (${fileData.file_size_mb.toFixed(1)}MB)`,
     storageMb: fileData.file_size_mb,
     writes: 1,
   });
@@ -2429,28 +2933,43 @@ export async function submitCapturedFlowDataWithRuleEngine(
     id: custId,
     tenant_id: tenantId,
     full_name: payload.customer_name,
+    name: payload.customer_name,
     phone,
-    email: `${payload.customer_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@patient.io`,
+    phone_number: phone,
+    email: `${payload.customer_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@client.io`,
     service_interest: serviceName,
+    status: 'active',
+    total_bookings: 1,
+    total_completed_visits: 0,
+    last_interacted_at: now,
     notes: 'Captured directly within WhatsApp multi-turn flow',
     created_at: now,
   };
   reactiveStore.addCustomer(newCust);
 
   // 2. Rule Engine: auto-create Confirmed Appointment directly in DB
+  const apptDate = payload.captured_data.booking_date || new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const apptTime = payload.captured_data.booking_time || '11:00 AM';
+
   const apptId = `appt-${now}-${Math.floor(100 + Math.random() * 900)}`;
   const newAppt: Appointment = {
     id: apptId,
     tenant_id: tenantId,
     customer_id: custId,
+    client_id: custId,
     customer_name: payload.customer_name,
+    client_name: payload.customer_name,
     customer_phone: phone,
+    client_phone: phone,
     service_name: serviceName,
-    date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    time: '11:00',
+    date: apptDate,
+    time: apptTime,
+    duration_minutes: 45,
     status: 'CONFIRMED',
+    booking_source: 'whatsapp_bot',
     notes: `In-WhatsApp automated slot: ${dateSlot}`,
     created_at: now,
+    updated_at: now,
   };
   reactiveStore.addAppointment(newAppt);
 
@@ -2508,5 +3027,511 @@ export async function submitCapturedFlowDataWithRuleEngine(
 
   return { submission, appointment: newAppt, newBalance };
 }
+
+/**
+ * ============================================================================
+ * REAL-TIME SLOT BOOKING ENGINE (CONCURRENCY CONTROL VIA FIRESTORE TRANSACTIONS)
+ * Multi-tenant path: tenants/{tenantId}/booking_dates/{YYYY-MM-DD}/slots/{slotId}
+ * ============================================================================
+ */
+
+export const DEFAULT_BOOKING_SLOT_TIMES = [
+  '09:00 AM',
+  '10:30 AM',
+  '01:00 PM',
+  '02:30 PM',
+  '04:00 PM',
+];
+
+/**
+ * Normalizes time string to a deterministic document ID
+ * e.g., "10:00 AM" -> "slot-10-00-am"
+ */
+export function normalizeSlotId(timeStr: string): string {
+  const clean = timeStr.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return `slot-${clean}`;
+}
+
+/**
+ * Admin utility: Configures or adds custom time slots dynamically per date.
+ * Uses Firestore writeBatch for atomic multi-document writes.
+ * Multi-tenant path: tenants/{tenantId}/booking_dates/{dateStr}/slots/{slotId}
+ */
+export async function addSlots(
+  tenantId: string,
+  dateStr: string,
+  slotTimes: string[] = DEFAULT_BOOKING_SLOT_TIMES
+): Promise<{ count: number; date: string; slots: BookingSlotDoc[] }> {
+  const now = Date.now();
+  const createdSlots: BookingSlotDoc[] = slotTimes.map((time) => {
+    const slotId = normalizeSlotId(time);
+    return {
+      id: slotId,
+      time,
+      status: 'available' as BookingSlotStatus,
+      booked_by: null,
+      booked_at: null,
+      created_at: now,
+    };
+  });
+
+  // Always update local reactive store for instant offline/fallback availability
+  const existingLocal = reactiveStore.getBookingSlots(tenantId, dateStr);
+  const slotMap = new Map<string, BookingSlotDoc>();
+  existingLocal.forEach((s) => slotMap.set(s.id, s));
+  createdSlots.forEach((s) => {
+    if (!slotMap.has(s.id) || slotMap.get(s.id)!.status === 'available') {
+      slotMap.set(s.id, s);
+    }
+  });
+  const mergedSlots = Array.from(slotMap.values());
+  reactiveStore.setBookingSlots(tenantId, dateStr, mergedSlots);
+
+  // Firestore writeBatch atomic execution
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      const batch = writeBatch(db);
+      const parentDateRef = doc(db, 'tenants', tenantId, 'booking_dates', dateStr);
+
+      const dateDocData: BookingDateDoc = {
+        date: dateStr,
+        tenant_id: tenantId,
+        total_slots: mergedSlots.length,
+        available_slots: mergedSlots.filter((s) => s.status === 'available').length,
+        updated_at: now,
+      };
+      batch.set(parentDateRef, dateDocData, { merge: true });
+
+      for (const slot of createdSlots) {
+        const slotRef = doc(db, 'tenants', tenantId, 'booking_dates', dateStr, 'slots', slot.id);
+        batch.set(slotRef, slot, { merge: true });
+      }
+
+      await batch.commit();
+    } catch (err) {
+      console.warn('addSlots writeBatch failed on live Firebase, fallback to reactive store:', err);
+    }
+  }
+
+  return { count: createdSlots.length, date: dateStr, slots: mergedSlots };
+}
+
+/**
+ * Step A: Query status === 'available' slots for a requested date.
+ * If 0 slots exist on that date initially, automatically seeds default slots.
+ */
+export async function getAvailableSlots(
+  tenantId: string,
+  dateStr: string
+): Promise<BookingSlotDoc[]> {
+  // 1. Try Live Firestore
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      const slotsColRef = collection(db, 'tenants', tenantId, 'booking_dates', dateStr, 'slots');
+      const q = query(slotsColRef, where('status', '==', 'available'));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        const list: BookingSlotDoc[] = [];
+        snap.forEach((d) => list.push(d.data() as BookingSlotDoc));
+        return list;
+      }
+
+      const allSnap = await getDocs(query(slotsColRef, limit(1)));
+      if (allSnap.empty) {
+        const seeded = await addSlots(tenantId, dateStr, DEFAULT_BOOKING_SLOT_TIMES);
+        return seeded.slots.filter((s) => s.status === 'available');
+      }
+
+      return [];
+    } catch (err) {
+      console.warn('getAvailableSlots live firestore read failed, fallback to local store:', err);
+    }
+  }
+
+  // 2. Reactive Store Fallback
+  let localSlots = reactiveStore.getBookingSlots(tenantId, dateStr);
+  if (!localSlots || localSlots.length === 0) {
+    const seeded = await addSlots(tenantId, dateStr, DEFAULT_BOOKING_SLOT_TIMES);
+    return seeded.slots.filter((s) => s.status === 'available');
+  }
+
+  return localSlots.filter((s) => s.status === 'available');
+}
+
+/**
+ * Step B: Atomic Booking Logic (Prevent Double Booking)
+ * Uses Firestore runTransaction to guarantee mutual exclusion and eliminate race conditions.
+ */
+export async function bookSlot(
+  tenantId: string,
+  dateStr: string,
+  slotIdOrTime: string,
+  customerDetails: {
+    customer_phone: string;
+    customer_name?: string;
+    service?: string;
+  }
+): Promise<BookSlotResult> {
+  const slotId = slotIdOrTime.startsWith('slot-')
+    ? slotIdOrTime
+    : normalizeSlotId(slotIdOrTime);
+  const nowIso = new Date().toISOString();
+  const bookingId = `BK-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+
+  // 1. Live Firestore Concurrency Transaction
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      const slotDocRef = doc(db, 'tenants', tenantId, 'booking_dates', dateStr, 'slots', slotId);
+      const parentDateRef = doc(db, 'tenants', tenantId, 'booking_dates', dateStr);
+
+      const txnResult = await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotDocRef);
+
+        if (!slotSnap.exists()) {
+          return {
+            success: false,
+            reason: 'SLOT_NOT_FOUND' as const,
+            message: `Time slot "${slotIdOrTime}" was not found for ${dateStr}.`,
+          };
+        }
+
+        const slotData = slotSnap.data() as BookingSlotDoc;
+
+        if (slotData.status !== 'available') {
+          return {
+            success: false,
+            reason: 'SLOT_ALREADY_TAKEN' as const,
+            message: `Slot "${slotData.time || slotIdOrTime}" was just booked by another customer. Please choose an alternative slot.`,
+            slotData,
+          };
+        }
+
+        const updatedSlot: Partial<BookingSlotDoc> = {
+          status: 'booked',
+          booked_by: customerDetails.customer_phone,
+          booked_at: nowIso,
+          customer_name: customerDetails.customer_name || 'Valued Client',
+          service: customerDetails.service || 'Appointment',
+        };
+
+        transaction.update(slotDocRef, updatedSlot);
+
+        const dateSnap = await transaction.get(parentDateRef);
+        if (dateSnap.exists()) {
+          const currentAvail = (dateSnap.data() as BookingDateDoc).available_slots || 0;
+          transaction.update(parentDateRef, {
+            available_slots: Math.max(0, currentAvail - 1),
+            updated_at: Date.now(),
+          });
+        }
+
+        return {
+          success: true,
+          bookingId,
+          slotData: {
+            ...slotData,
+            ...updatedSlot,
+          } as BookingSlotDoc,
+        };
+      });
+
+      reactiveStore.bookSlotLocal(tenantId, dateStr, slotId, customerDetails);
+      return txnResult;
+    } catch (err: any) {
+      console.warn('bookSlot Firestore transaction failed, falling back to local store:', err);
+    }
+  }
+
+  return reactiveStore.bookSlotLocal(tenantId, dateStr, slotId, customerDetails);
+}
+
+/**
+ * Step C: Fallback / Zero Slots Available Logic
+ */
+export async function findNextAvailableDateWithSlots(
+  tenantId: string,
+  startDateStr: string
+): Promise<NextAvailableDateResult | null> {
+  let baseDate = new Date(startDateStr);
+  if (isNaN(baseDate.getTime())) {
+    baseDate = new Date();
+  }
+
+  for (let offset = 1; offset <= 14; offset++) {
+    const nextDate = new Date(baseDate);
+    nextDate.setDate(baseDate.getDate() + offset);
+
+    const yyyy = nextDate.getFullYear();
+    const mm = String(nextDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(nextDate.getDate()).padStart(2, '0');
+    const checkDateStr = `${yyyy}-${mm}-${dd}`;
+
+    const slots = await getAvailableSlots(tenantId, checkDateStr);
+    const available = slots.filter((s) => s.status === 'available');
+
+    if (available.length > 0) {
+      const formattedDate = nextDate.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+      return {
+        date: checkDateStr,
+        formattedDate,
+        earliestSlot: available[0],
+        availableCount: available.length,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Admin Helper: Pre-populates default slots for today and next 7 days
+ */
+export async function seedDefaultBookingSlotsForWeek(tenantId: string): Promise<void> {
+  const today = new Date();
+  for (let i = 0; i < 7; i++) {
+    const target = new Date(today);
+    target.setDate(today.getDate() + i);
+    const yyyy = target.getFullYear();
+    const mm = String(target.getMonth() + 1).padStart(2, '0');
+    const dd = String(target.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    await addSlots(tenantId, dateStr, DEFAULT_BOOKING_SLOT_TIMES);
+  }
+}
+
+// ==========================================
+// Credit Top-Up Workflow & Request Management
+// ==========================================
+
+/**
+ * Submits a credit top-up request from a Business Admin.
+ */
+export async function requestCreditTopUp(params: {
+  tenant_id: string;
+  business_name: string;
+  amount: number;
+  payment_reference?: string;
+  notes?: string;
+  requested_by_email: string;
+}): Promise<CreditTopUpRequest> {
+  const now = Date.now();
+  const id = `req-${now}-${Math.floor(100 + Math.random() * 900)}`;
+
+  const newRequest: CreditTopUpRequest = {
+    id,
+    tenant_id: params.tenant_id,
+    business_name: params.business_name,
+    amount: Number(params.amount),
+    payment_reference: params.payment_reference?.trim() || '',
+    notes: params.notes?.trim() || '',
+    status: 'PENDING',
+    requested_by_email: params.requested_by_email,
+    requested_at: now,
+  };
+
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      await setDoc(doc(db, 'credit_requests', id), {
+        ...newRequest,
+        requested_at: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Firestore credit request write failed, fallback to local store:', e);
+    }
+  }
+
+  reactiveStore.addCreditRequest(newRequest);
+  return newRequest;
+}
+
+/**
+ * Super Admin approval function: Atomically adds credits to the tenant's wallet and updates request status.
+ */
+export async function approveCreditTopUp(params: {
+  requestId: string;
+  approverId: string;
+}): Promise<{ success: boolean; request: CreditTopUpRequest; newBalance: number }> {
+  const requests = reactiveStore.getCreditRequests();
+  const targetReq = requests.find((r) => r.id === params.requestId);
+
+  if (!targetReq) {
+    throw new Error(`Credit request with ID "${params.requestId}" not found.`);
+  }
+
+  if (targetReq.status !== 'PENDING') {
+    throw new Error(`Credit request "${params.requestId}" is already ${targetReq.status.toLowerCase()}.`);
+  }
+
+  // 1. Atomically adjust credits on tenant wallet
+  const adjustResult = await adjustTenantCredits({
+    tenant_id: targetReq.tenant_id,
+    amount: targetReq.amount,
+    note: `Super Admin (${params.approverId}) approved credit top-up request #${targetReq.id} [Ref: ${targetReq.payment_reference || 'N/A'}]`,
+    adminId: params.approverId,
+  });
+
+  const now = Date.now();
+  const updatedReq: CreditTopUpRequest = {
+    ...targetReq,
+    status: 'APPROVED',
+    resolved_at: now,
+    resolved_by: params.approverId,
+  };
+
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      await updateDoc(doc(db, 'credit_requests', params.requestId), {
+        status: 'APPROVED',
+        resolved_at: serverTimestamp(),
+        resolved_by: params.approverId,
+      });
+    } catch (e) {
+      console.warn('Firestore credit request update failed:', e);
+    }
+  }
+
+  reactiveStore.updateCreditRequest(params.requestId, {
+    status: 'APPROVED',
+    resolved_at: now,
+    resolved_by: params.approverId,
+  });
+
+  return { success: true, request: updatedReq, newBalance: adjustResult.newBalance };
+}
+
+/**
+ * Super Admin rejection function: Marks the request as REJECTED with mandatory or optional reason.
+ */
+export async function rejectCreditTopUp(params: {
+  requestId: string;
+  approverId: string;
+  rejectionReason?: string;
+}): Promise<{ success: boolean; request: CreditTopUpRequest }> {
+  const requests = reactiveStore.getCreditRequests();
+  const targetReq = requests.find((r) => r.id === params.requestId);
+
+  if (!targetReq) {
+    throw new Error(`Credit request with ID "${params.requestId}" not found.`);
+  }
+
+  const now = Date.now();
+  const updatedReq: CreditTopUpRequest = {
+    ...targetReq,
+    status: 'REJECTED',
+    resolved_at: now,
+    resolved_by: params.approverId,
+    rejection_reason: params.rejectionReason || 'Rejected by platform Super Admin reconciliation review.',
+  };
+
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      await updateDoc(doc(db, 'credit_requests', params.requestId), {
+        status: 'REJECTED',
+        resolved_at: serverTimestamp(),
+        resolved_by: params.approverId,
+        rejection_reason: updatedReq.rejection_reason,
+      });
+    } catch (e) {
+      console.warn('Firestore credit request reject write failed:', e);
+    }
+  }
+
+  reactiveStore.updateCreditRequest(params.requestId, {
+    status: 'REJECTED',
+    resolved_at: now,
+    resolved_by: params.approverId,
+    rejection_reason: updatedReq.rejection_reason,
+  });
+
+  return { success: true, request: updatedReq };
+}
+
+/**
+ * Subscribes to real-time credit top-up requests (optionally filtered by tenant_id).
+ */
+export function subscribeCreditRequests(
+  callback: (requests: CreditTopUpRequest[]) => void,
+  tenantIdFilter?: string
+): Unsubscribe {
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      const q = tenantIdFilter
+        ? query(collection(db, 'credit_requests'), where('tenant_id', '==', tenantIdFilter), orderBy('requested_at', 'desc'))
+        : query(collection(db, 'credit_requests'), orderBy('requested_at', 'desc'));
+
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const list: CreditTopUpRequest[] = [];
+            snapshot.forEach((d) => {
+              const data = d.data() as any;
+              list.push({ ...data, id: d.id });
+            });
+            callback(list);
+          } else {
+            callback(reactiveStore.getCreditRequests(tenantIdFilter));
+          }
+        },
+        () => {
+          reactiveStore.subscribeCreditRequests(callback, tenantIdFilter);
+        }
+      );
+      return unsub;
+    } catch (e) {
+      console.warn('Firestore credit requests listener error:', e);
+    }
+  }
+
+  return reactiveStore.subscribeCreditRequests(callback, tenantIdFilter);
+}
+
+/**
+ * Updates tenant profile and clinic configuration (locked fields are protected).
+ */
+export async function updateTenantProfile(
+  tenantId: string,
+  updates: Partial<Tenant>
+): Promise<Tenant> {
+  const tenants = reactiveStore.getTenants();
+  const current = tenants.find((t) => t.id === tenantId || t.tenant_id === tenantId);
+
+  if (!current) {
+    throw new Error(`Tenant with ID ${tenantId} not found.`);
+  }
+
+  // Enforce field-level protection: do not allow overwriting locked system identity fields
+  const safeUpdates: Partial<Tenant> = {
+    business_name: updates.business_name || current.business_name,
+    address: updates.address !== undefined ? updates.address : current.address,
+    operating_hours: updates.operating_hours !== undefined ? updates.operating_hours : current.operating_hours,
+    contact_phone: updates.contact_phone !== undefined ? updates.contact_phone : current.contact_phone,
+    description: updates.description !== undefined ? updates.description : current.description,
+    logo_url: updates.logo_url !== undefined ? updates.logo_url : current.logo_url,
+    website_url: updates.website_url !== undefined ? updates.website_url : current.website_url,
+    social_links: updates.social_links !== undefined ? updates.social_links : current.social_links,
+    updated_at: Date.now(),
+  };
+
+  if (db && isLiveFirebaseConfigured) {
+    try {
+      await updateDoc(doc(db, 'tenants', current.id), {
+        ...safeUpdates,
+        updated_at: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Firestore tenant profile update failed, using local store:', e);
+    }
+  }
+
+  reactiveStore.updateTenant(current.id, safeUpdates);
+  return { ...current, ...safeUpdates };
+}
+
 
 

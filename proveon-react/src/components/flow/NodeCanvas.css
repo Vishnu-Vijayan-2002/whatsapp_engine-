@@ -134,6 +134,9 @@
 .palette-btn.support {
   color: #0284C7;
 }
+.palette-btn.slot-booking {
+  color: #4F46E5;
+}
 .palette-btn.terminal {
   color: #14B8A6;
 }
@@ -242,6 +245,10 @@
 
 .flow-node-card.type-SUPPORT_HELPDESK .node-header {
   background: linear-gradient(135deg, #0284C7 0%, #38BDF8 100%);
+}
+
+.flow-node-card.type-SLOT_BOOKING .node-header {
+  background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
 }
 
 .flow-node-card.type-TERMINAL .node-header {

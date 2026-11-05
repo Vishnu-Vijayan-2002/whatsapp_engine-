@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { WhatsAppNodeFlow, FlowNode, TerminalNodeData } from '../../types';
+import type {
+  WhatsAppNodeFlow,
+  FlowNode,
+  TerminalNodeData,
+  BookingSlotDoc,
+  NextAvailableDateResult,
+} from '../../types';
 import {
   submitCapturedFlowDataWithRuleEngine,
   saveWhatsAppSession,
   resetWhatsAppSession,
-  checkSlotCollision,
+  getAvailableSlots,
+  bookSlot,
+  findNextAvailableDateWithSlots,
 } from '../../firebase/firestoreService';
 
 interface FlowSimulatorProps {
@@ -33,12 +41,13 @@ const formatTime = () => {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// WhatsApp In-Chat Calendar & Time Slot Picker Component
+// WhatsApp In-Chat Calendar & Real-Time Dynamic Slot Picker Component
 interface WhatsAppCalendarPickerProps {
+  tenantId: string;
   onSelectSlot: (slotStr: string) => void;
 }
 
-// Lazy initialization for appointment calendar picker
+// Helper to construct next 4 quick date chips
 const getInitialPickerData = () => {
   const baseNow = Date.now();
   const dates = [1, 2, 3, 4].map((offset) => {
@@ -54,28 +63,71 @@ const getInitialPickerData = () => {
   };
 };
 
-const WhatsAppCalendarPicker: React.FC<WhatsAppCalendarPickerProps> = ({ onSelectSlot }) => {
+const WhatsAppCalendarPicker: React.FC<WhatsAppCalendarPickerProps> = ({ tenantId, onSelectSlot }) => {
   const [pickerData] = useState(getInitialPickerData);
   const [selectedDate, setSelectedDate] = useState<string>(pickerData.defaultDate);
-  const [selectedTime, setSelectedTime] = useState<string>('02:00 PM');
+  const [selectedTime, setSelectedTime] = useState<string>('');
+  const [availableSlots, setAvailableSlots] = useState<BookingSlotDoc[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState<boolean>(true);
+  const [fallbackNextDate, setFallbackNextDate] = useState<NextAvailableDateResult | null>(null);
 
   const { quickDates, minDate } = pickerData;
-  const timeSlots = ['09:30 AM', '11:00 AM', '02:00 PM', '03:30 PM', '05:00 PM', '06:30 PM'];
 
   const chosenObj = quickDates.find((q) => q.iso === selectedDate);
-  const formattedDateLabel = chosenObj
-    ? chosenObj.label
-    : selectedDate;
+  const formattedDateLabel = chosenObj ? chosenObj.label : selectedDate;
+
+  const handleDateChange = (newDate: string) => {
+    setSelectedDate(newDate);
+    setIsLoadingSlots(true);
+    setFallbackNextDate(null);
+  };
+
+  // Real-Time Query: Fetch available slots for selectedDate from Firestore
+  useEffect(() => {
+    let isCancelled = false;
+
+    getAvailableSlots(tenantId, selectedDate)
+      .then((slots) => {
+        if (!isCancelled) {
+          const avail = slots.filter((s) => s.status === 'available');
+          setAvailableSlots(avail);
+          if (avail.length > 0) {
+            setSelectedTime(avail[0].time);
+            setFallbackNextDate(null);
+          } else {
+            setSelectedTime('');
+            // Fallback / Zero Slots Available: find next date
+            findNextAvailableDateWithSlots(tenantId, selectedDate).then((nextRes) => {
+              if (!isCancelled && nextRes) {
+                setFallbackNextDate(nextRes);
+              }
+            });
+          }
+          setIsLoadingSlots(false);
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          console.warn('Real-time slot fetch error:', err);
+          setIsLoadingSlots(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [tenantId, selectedDate]);
 
   const handleConfirm = () => {
-    onSelectSlot(`${formattedDateLabel} at ${selectedTime}`);
+    if (!selectedTime) return;
+    onSelectSlot(`${selectedDate} at ${selectedTime}`);
   };
 
   return (
     <div className="wa-calendar-slot-picker">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span className="wa-picker-section-title">📅 Choose Appointment Date</span>
-        <span style={{ fontSize: '10px', color: '#00A884', fontWeight: 700 }}>Interactive Calendar</span>
+        <span style={{ fontSize: '10px', color: '#00A884', fontWeight: 700 }}>Real-Time Availability</span>
       </div>
 
       {/* Quick Date Chips */}
@@ -85,7 +137,7 @@ const WhatsAppCalendarPicker: React.FC<WhatsAppCalendarPickerProps> = ({ onSelec
             key={q.iso}
             type="button"
             className={`wa-date-chip ${selectedDate === q.iso ? 'selected' : ''}`}
-            onClick={() => setSelectedDate(q.iso)}
+            onClick={() => handleDateChange(q.iso)}
           >
             {q.offset === 1 ? `Tomorrow (${q.label})` : q.label}
           </button>
@@ -100,35 +152,79 @@ const WhatsAppCalendarPicker: React.FC<WhatsAppCalendarPickerProps> = ({ onSelec
           value={selectedDate}
           min={minDate}
           onChange={(e) => {
-            if (e.target.value) setSelectedDate(e.target.value);
+            if (e.target.value) handleDateChange(e.target.value);
           }}
           title="Pick custom date from calendar"
         />
       </div>
 
-      <span className="wa-picker-section-title" style={{ marginTop: '4px' }}>⏰ Select Preferred Time Slot</span>
-      <div className="wa-time-chips-grid">
-        {timeSlots.map((time) => (
-          <button
-            key={time}
-            type="button"
-            className={`wa-time-chip ${selectedTime === time ? 'selected' : ''}`}
-            onClick={() => setSelectedTime(time)}
-          >
-            {time}
-          </button>
-        ))}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+        <span className="wa-picker-section-title" style={{ margin: 0 }}>⏰ Real-Time Slots ({availableSlots.length} Open)</span>
+        {isLoadingSlots && <span style={{ fontSize: '10px', color: '#8696A0' }}>Checking live DB...</span>}
       </div>
+
+      {/* Real-Time Available Slots Grid */}
+      {isLoadingSlots ? (
+        <div style={{ padding: '10px 0', textAlign: 'center', fontSize: '11px', color: '#8696A0' }}>
+          Querying live slot availability...
+        </div>
+      ) : availableSlots.length > 0 ? (
+        <div className="wa-time-chips-grid">
+          {availableSlots.map((slot) => (
+            <button
+              key={slot.id || slot.time}
+              type="button"
+              className={`wa-time-chip ${selectedTime === slot.time ? 'selected' : ''}`}
+              onClick={() => setSelectedTime(slot.time)}
+            >
+              {slot.time}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{ padding: '8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontSize: '11.5px', color: '#F87171', marginTop: '6px' }}>
+          <span>⚠️ All slots on this date are fully booked!</span>
+          {fallbackNextDate && (
+            <div style={{ marginTop: '6px' }}>
+              <span style={{ color: '#E2E8F0', display: 'block', fontSize: '11px', marginBottom: '4px' }}>
+                Next opening: <strong>{fallbackNextDate.formattedDate}</strong> at {fallbackNextDate.earliestSlot.time} ({fallbackNextDate.availableCount} slots open)
+              </span>
+              <button
+                type="button"
+                style={{
+                  background: '#00A884',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+                onClick={() => {
+                  handleDateChange(fallbackNextDate.date);
+                }}
+              >
+                Select {fallbackNextDate.formattedDate} ➔
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <button
         type="button"
         className="wa-confirm-slot-btn"
+        disabled={!selectedTime}
+        style={{ opacity: selectedTime ? 1 : 0.5, cursor: selectedTime ? 'pointer' : 'not-allowed' }}
         onClick={handleConfirm}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <polyline points="20 6 9 17 4 12" />
         </svg>
-        <span>Confirm Slot: {formattedDateLabel} at {selectedTime}</span>
+        <span>
+          {selectedTime ? `Confirm Slot: ${formattedDateLabel} at ${selectedTime}` : 'Select an available time slot'}
+        </span>
       </button>
     </div>
   );
@@ -160,6 +256,35 @@ const interpolateVars = (
   return template.replace(/\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/g, (_, key) => {
     return enriched[key] !== undefined ? enriched[key] : `[${key}]`;
   });
+};
+
+// Helper to extract deterministic YYYY-MM-DD and time slot string from user input
+const parseDateAndTimeToIso = (raw: string): { dateStr: string; timeStr: string } => {
+  const tomorrow = new Date(Date.now() + 86400000);
+  const tomorrowIso = tomorrow.toISOString().split('T')[0];
+
+  let rawDate = tomorrowIso;
+  let rawTime = '10:30 AM';
+
+  if (raw.toLowerCase().includes(' at ')) {
+    const parts = raw.split(/\s+at\s+/i);
+    rawDate = parts[0].trim();
+    rawTime = parts[1].trim();
+  } else if (raw.includes(',')) {
+    const parts = raw.split(',');
+    rawDate = parts[0].trim();
+    rawTime = parts[1]?.trim() || '10:30 AM';
+  } else {
+    rawTime = raw.trim();
+  }
+
+  // Check if rawDate contains YYYY-MM-DD
+  const isoMatch = rawDate.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  if (isoMatch) {
+    return { dateStr: isoMatch[0], timeStr: rawTime };
+  }
+
+  return { dateStr: tomorrowIso, timeStr: rawTime };
 };
 
 // Safe Keyword Normalization for trigger matching
@@ -477,6 +602,27 @@ export const FlowSimulator: React.FC<FlowSimulatorProps> = ({
 
         setActiveNodeId(node.id);
         return;
+      } else if (node.type === 'SLOT_BOOKING') {
+        const data = node.data as any;
+        const promptText = interpolateVars(
+          data.prompt || 'Please select an available appointment slot for {{service_name}}:',
+          currentVars,
+          tenantName
+        );
+
+        setActiveNodeId(node.id);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextMsgId('bot-slot-prompt'),
+            sender: 'bot',
+            header: `${tenantName} • Slot Booking`,
+            text: promptText,
+            isDateSlotPicker: true,
+            time: formatTime(),
+          },
+        ]);
+        return;
       } else if (node.type === 'TERMINAL') {
         const data = node.data as TerminalNodeData;
         const receiptText = interpolateVars(
@@ -536,7 +682,7 @@ export const FlowSimulator: React.FC<FlowSimulatorProps> = ({
   };
 
   // Handle Inbound User Input Submission with Router Evaluation
-  const handleUserReply = (userText: string) => {
+  const handleUserReply = async (userText: string) => {
     const trimmed = userText.trim();
     if (!trimmed) return;
 
@@ -612,12 +758,13 @@ export const FlowSimulator: React.FC<FlowSimulatorProps> = ({
         activeNode &&
         (activeNode.type === 'USER_INPUT' ||
           activeNode.type === 'MESSAGE' ||
-          activeNode.type === 'SUPPORT_HELPDESK')
+          activeNode.type === 'SUPPORT_HELPDESK' ||
+          activeNode.type === 'SLOT_BOOKING')
       ) {
-        const varName = (activeNode.data as any).variableName || `var_${activeNode.id}`;
+        const varName = (activeNode.data as any).variableName || (activeNode.type === 'SLOT_BOOKING' ? 'appointment_slot' : `var_${activeNode.id}`);
         const updatedVars: Record<string, string> = {
           ...capturedVariables,
-          ...(activeNode.type === 'USER_INPUT' ? { [varName]: trimmed } : {}),
+          ...(activeNode.type === 'USER_INPUT' || activeNode.type === 'SLOT_BOOKING' ? { [varName]: trimmed } : {}),
         };
 
         if (activeNode.type === 'SUPPORT_HELPDESK') {
@@ -710,49 +857,72 @@ export const FlowSimulator: React.FC<FlowSimulatorProps> = ({
               updatedVars.service_duration = `${matchedSrv.durationMinutes || 30} mins`;
             }
           }
-        } else if (varName === 'booking_slot' || varName === 'appointment_slot') {
-          updatedVars.booking_slot = trimmed;
-          updatedVars.appointment_slot = trimmed;
+        } else if (activeNode.type === 'SLOT_BOOKING' || varName === 'booking_slot' || varName === 'appointment_slot') {
+          const { dateStr, timeStr } = parseDateAndTimeToIso(trimmed);
+          updatedVars.booking_date = dateStr;
+          updatedVars.booking_time = timeStr;
+          updatedVars.booking_slot = `${dateStr} at ${timeStr}`;
+          updatedVars.appointment_slot = `${dateStr} at ${timeStr}`;
 
-          // Split preferred date and time dynamically
-          if (trimmed.toLowerCase().includes(' at ')) {
-            const parts = trimmed.split(/\s+at\s+/i);
-            updatedVars.booking_date = parts[0].trim();
-            updatedVars.booking_time = parts[1].trim();
-          } else if (trimmed.includes(',')) {
-            const parts = trimmed.split(',');
-            updatedVars.booking_date = parts[0].trim();
-            updatedVars.booking_time = parts[1]?.trim() || '11:00 AM';
-          } else {
-            updatedVars.booking_date = trimmed;
-            updatedVars.booking_time = 'Confirmed';
-          }
+          // Step B: Atomic Concurrency Booking via Firestore runTransaction
+          const bookRes = await bookSlot(tenantId, dateStr, timeStr, {
+            customer_phone: SIMULATOR_PHONE,
+            customer_name: updatedVars.customer_name || 'Valued Client',
+            service: updatedVars.selected_service || updatedVars.service_name || 'Appointment',
+          });
 
-          // Real-Time Slot Collision Detection Check
-          const datePart = updatedVars.booking_date || trimmed;
-          const timePart = updatedVars.booking_time || trimmed;
-          const collision = checkSlotCollision(
-            tenantId,
-            datePart,
-            timePart,
-            updatedVars.selected_doctor || updatedVars.selected_service
-          );
-
-          if (collision.hasCollision) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: nextMsgId('slot-collision-alert'),
-                sender: 'bot',
-                text: `⚠️ Notice: "${trimmed}" is already reserved for an appointment. To prevent scheduling conflicts, please select one of the following available alternative slots:`,
-                choices: collision.alternativeSlots.map((s) => `${datePart} at ${s}`),
-                isDateSlotPicker: true,
-                time: formatTime(),
-              },
-            ]);
+          if (!bookRes.success) {
+            // Race condition or slot collision!
+            const remaining = await getAvailableSlots(tenantId, dateStr);
+            if (remaining.length > 0) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: nextMsgId('slot-race-alert'),
+                  sender: 'bot',
+                  text: `⚠️ Notice: Time slot "${timeStr}" on ${dateStr} was just booked by another customer! To prevent double booking, please select one of the currently open slots:`,
+                  choices: remaining.map((s) => `${dateStr} at ${s.time}`),
+                  isDateSlotPicker: true,
+                  time: formatTime(),
+                },
+              ]);
+            } else {
+              // Step C: Fallback / Zero Slots Available on date -> Query next chronological date
+              const nextDateInfo = await findNextAvailableDateWithSlots(tenantId, dateStr);
+              if (nextDateInfo) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: nextMsgId('slot-zero-fallback'),
+                    sender: 'bot',
+                    text: `⚠️ Notice: All slots on ${dateStr} are currently filled! The earliest opening available is on ${nextDateInfo.formattedDate} at ${nextDateInfo.earliestSlot.time} (${nextDateInfo.availableCount} slots open).`,
+                    choices: [
+                      `${nextDateInfo.date} at ${nextDateInfo.earliestSlot.time}`,
+                      'Choose another date',
+                    ],
+                    isDateSlotPicker: true,
+                    time: formatTime(),
+                  },
+                ]);
+              } else {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: nextMsgId('slot-no-openings'),
+                    sender: 'bot',
+                    text: `⚠️ All slots for ${dateStr} are booked. Please pick an alternative date from the calendar below.`,
+                    isDateSlotPicker: true,
+                    time: formatTime(),
+                  },
+                ]);
+              }
+            }
             // Remain on active slot selection step
             return;
           }
+
+          // Atomic Booking Succeeded!
+          updatedVars.booking_id = bookRes.bookingId || updatedVars.booking_id || 'BK-1082';
         } else if (varName === 'rating') {
           updatedVars.rating = trimmed;
         }
@@ -979,6 +1149,7 @@ export const FlowSimulator: React.FC<FlowSimulatorProps> = ({
                     {/* Interactive Calendar & Time Slot Picker */}
                     {m.isDateSlotPicker && activeNodeId && (
                       <WhatsAppCalendarPicker
+                        tenantId={tenantId}
                         onSelectSlot={(slotStr) => handleUserReply(slotStr)}
                       />
                     )}

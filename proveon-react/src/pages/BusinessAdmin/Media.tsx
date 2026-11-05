@@ -18,8 +18,8 @@ const MediaPage: React.FC = () => {
 
   // New Upload Form State
   const [fileName, setFileName] = useState('');
-  const [fileCategory, setFileCategory] = useState<MediaFile['category']>('CLINIC_XRAY');
-  const [fileSizeMb, setFileSizeMb] = useState<number>(8.5);
+  const [fileCategory, setFileCategory] = useState<MediaFile['category']>('DOCUMENT');
+  const [fileSizeMb, setFileSizeMb] = useState<number>(4.5);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   const showToast = (msg: string) => {
@@ -58,12 +58,12 @@ const MediaPage: React.FC = () => {
     try {
       setIsUploading(true);
 
-      // Select realistic stock image depending on category
-      let sampleUrl = 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=600&auto=format&fit=crop&q=60';
+      // Select realistic stock preview depending on category
+      let sampleUrl = 'https://images.unsplash.com/photo-1586281380349-632531db7ed4?w=600&auto=format&fit=crop&q=60';
       if (fileCategory === 'PORTFOLIO_IMAGE') {
         sampleUrl = 'https://images.unsplash.com/photo-1512290900672-1f41d3b0c538?w=600&auto=format&fit=crop&q=60';
-      } else if (fileCategory === 'CONSENT_FORM') {
-        sampleUrl = 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=600&auto=format&fit=crop&q=60';
+      } else if (fileCategory === 'CONTRACT') {
+        sampleUrl = 'https://images.unsplash.com/photo-1450133064473-71024230f91b?w=600&auto=format&fit=crop&q=60';
       }
 
       const res = await uploadMediaWithMetering(tenantId, {
@@ -108,7 +108,7 @@ const MediaPage: React.FC = () => {
       {/* Page Header */}
       <div className="dash-page-header">
         <div>
-          <h1 className="dash-page-title">Media & Cloud File Ingestion</h1>
+          <h1 className="dash-page-title">Documents & Media Management</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginTop: '4px' }}>
             {tenant?.business_name || 'Business'} • Dynamic Storage Metering (STORAGE_INGEST_MB = 1.00 cr / 10MB)
           </p>
@@ -126,7 +126,7 @@ const MediaPage: React.FC = () => {
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
-          Upload New File / Media
+          Upload Document / File
         </button>
       </div>
 
@@ -226,7 +226,7 @@ const MediaPage: React.FC = () => {
         </div>
         <div>
           <h3 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 800, color: 'var(--text-main)' }}>
-            Upload Patient X-Ray, Hair Portfolio, or Intake Form
+            Upload Client Contract, Proposal, Portfolio, or Intake Form
           </h3>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
             Click to select or drop files. Storage is billed dynamically at <strong>1.00 credit per 10MB</strong>.
@@ -236,12 +236,12 @@ const MediaPage: React.FC = () => {
 
       {/* Gallery Section with Category Filter */}
       <div className="dash-card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <h2 className="dash-section-title" style={{ margin: 0 }}>
-            Uploaded Media Attachments ({filteredMedia.length})
+            Uploaded Files & Documents ({filteredMedia.length})
           </h2>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               className={`btn-secondary-action ${selectedCategory === 'ALL' ? 'active' : ''}`}
               style={{
@@ -255,16 +255,28 @@ const MediaPage: React.FC = () => {
               All Files
             </button>
             <button
-              className={`btn-secondary-action ${selectedCategory === 'CLINIC_XRAY' ? 'active' : ''}`}
+              className={`btn-secondary-action ${selectedCategory === 'DOCUMENT' ? 'active' : ''}`}
               style={{
                 fontSize: '12px',
                 padding: '6px 12px',
-                background: selectedCategory === 'CLINIC_XRAY' ? 'var(--primary)' : 'var(--bg-input)',
-                color: selectedCategory === 'CLINIC_XRAY' ? '#fff' : 'var(--text-secondary)',
+                background: selectedCategory === 'DOCUMENT' ? 'var(--primary)' : 'var(--bg-input)',
+                color: selectedCategory === 'DOCUMENT' ? '#fff' : 'var(--text-secondary)',
               }}
-              onClick={() => setSelectedCategory('CLINIC_XRAY')}
+              onClick={() => setSelectedCategory('DOCUMENT')}
             >
-              Clinic X-Rays
+              Documents
+            </button>
+            <button
+              className={`btn-secondary-action ${selectedCategory === 'CONTRACT' ? 'active' : ''}`}
+              style={{
+                fontSize: '12px',
+                padding: '6px 12px',
+                background: selectedCategory === 'CONTRACT' ? 'var(--primary)' : 'var(--bg-input)',
+                color: selectedCategory === 'CONTRACT' ? '#fff' : 'var(--text-secondary)',
+              }}
+              onClick={() => setSelectedCategory('CONTRACT')}
+            >
+              Contracts
             </button>
             <button
               className={`btn-secondary-action ${selectedCategory === 'PORTFOLIO_IMAGE' ? 'active' : ''}`}
@@ -276,74 +288,72 @@ const MediaPage: React.FC = () => {
               }}
               onClick={() => setSelectedCategory('PORTFOLIO_IMAGE')}
             >
-              Portfolio Images
+              Portfolio & Media
             </button>
             <button
-              className={`btn-secondary-action ${selectedCategory === 'CONSENT_FORM' ? 'active' : ''}`}
+              className={`btn-secondary-action ${selectedCategory === 'OTHER' ? 'active' : ''}`}
               style={{
                 fontSize: '12px',
                 padding: '6px 12px',
-                background: selectedCategory === 'CONSENT_FORM' ? 'var(--primary)' : 'var(--bg-input)',
-                color: selectedCategory === 'CONSENT_FORM' ? '#fff' : 'var(--text-secondary)',
+                background: selectedCategory === 'OTHER' ? 'var(--primary)' : 'var(--bg-input)',
+                color: selectedCategory === 'OTHER' ? '#fff' : 'var(--text-secondary)',
               }}
-              onClick={() => setSelectedCategory('CONSENT_FORM')}
+              onClick={() => setSelectedCategory('OTHER')}
             >
-              Consent Forms
+              Other
             </button>
           </div>
         </div>
 
         {/* Media Grid */}
         <div className="media-gallery-grid">
-          {filteredMedia.map((m) => (
-            <div key={m.id} className="media-card">
-              <div className="media-card-preview">
-                <img src={m.url} alt={m.file_name} />
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: '8px',
-                    right: '8px',
-                    background: 'rgba(0, 0, 0, 0.75)',
-                    color: '#fff',
-                    fontSize: '11px',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontWeight: 700,
-                  }}
-                >
-                  {m.file_size_mb.toFixed(1)} MB
-                </span>
-              </div>
-              <div className="media-card-info">
-                <span className="media-card-title" title={m.file_name}>
-                  {m.file_name}
-                </span>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {filteredMedia.length === 0 ? (
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+              No documents or media found in this category.
+            </div>
+          ) : (
+            filteredMedia.map((m) => (
+              <div key={m.id} className="media-card">
+                <div className="media-card-preview">
+                  <img src={m.url} alt={m.file_name} />
                   <span
-                    className={`media-category-chip ${
-                      m.category === 'CLINIC_XRAY'
-                        ? 'xray'
-                        : m.category === 'PORTFOLIO_IMAGE'
-                        ? 'portfolio'
-                        : 'consent'
-                    }`}
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      right: '8px',
+                      background: 'rgba(0, 0, 0, 0.75)',
+                      color: '#fff',
+                      fontSize: '11px',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                    }}
                   >
-                    {m.category.replace('_', ' ')}
-                  </span>
-
-                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#EF3826' }}>
-                    -{m.credits_metered.toFixed(2)} cr
+                    {m.file_size_mb.toFixed(1)} MB
                   </span>
                 </div>
+                <div className="media-card-info">
+                  <span className="media-card-title" title={m.file_name}>
+                    {m.file_name}
+                  </span>
 
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  Uploaded {new Date(m.uploaded_at).toLocaleDateString()}
-                </span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="media-category-chip portfolio">
+                      {m.category.replace('_', ' ')}
+                    </span>
+
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: '#EF3826' }}>
+                      -{m.credits_metered.toFixed(2)} cr
+                    </span>
+                  </div>
+
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Uploaded {new Date(m.uploaded_at).toLocaleDateString()}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 
@@ -367,7 +377,7 @@ const MediaPage: React.FC = () => {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. panoramic_jaw_scan_patient3.jpg"
+                    placeholder="e.g. client_onboarding_agreement.pdf"
                     required
                     value={fileName}
                     onChange={(e) => setFileName(e.target.value)}
@@ -381,10 +391,10 @@ const MediaPage: React.FC = () => {
                     value={fileCategory}
                     onChange={(e) => setFileCategory(e.target.value as MediaFile['category'])}
                   >
-                    <option value="CLINIC_XRAY">Medical / Dental X-Ray & Scans</option>
-                    <option value="PORTFOLIO_IMAGE">Salon / Treatment Result Portfolio</option>
-                    <option value="CONSENT_FORM">Patient Signed Consent Document</option>
-                    <option value="OTHER">Other Clinical Attachment</option>
+                    <option value="DOCUMENT">Business / Client Document</option>
+                    <option value="CONTRACT">Service Contract / Agreement</option>
+                    <option value="PORTFOLIO_IMAGE">Portfolio / Photo Attachment</option>
+                    <option value="OTHER">Other Attachment</option>
                   </select>
                 </div>
 
@@ -449,4 +459,3 @@ const MediaPage: React.FC = () => {
 };
 
 export default MediaPage;
-

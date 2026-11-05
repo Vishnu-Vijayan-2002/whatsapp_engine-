@@ -31,6 +31,13 @@ export interface WabaIntegration {
   status?: 'CONNECTED' | 'DISCONNECTED' | 'PENDING';
 }
 
+export interface TenantSocialLinks {
+  instagram?: string;
+  facebook?: string;
+  linkedin?: string;
+  twitter?: string;
+}
+
 export interface Tenant {
   id: string;
   tenant_id: string;
@@ -46,8 +53,32 @@ export interface Tenant {
   active_flow_name?: string;
   active_flow_version?: number;
   active_flow_deployed_at?: number;
+  address?: string;
+  operating_hours?: string;
+  contact_phone?: string;
+  description?: string;
+  logo_url?: string;
+  website_url?: string;
+  social_links?: TenantSocialLinks;
   created_at?: any;
   updated_at?: any;
+}
+
+export type CreditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface CreditTopUpRequest {
+  id: string;
+  tenant_id: string;
+  business_name: string;
+  amount: number;
+  payment_reference?: string;
+  notes?: string;
+  status: CreditRequestStatus;
+  requested_by_email: string;
+  requested_at: any;
+  resolved_at?: any;
+  resolved_by?: string;
+  rejection_reason?: string;
 }
 
 export type ActionCode = 
@@ -117,30 +148,59 @@ export const DEFAULT_RATE_CARD: RateCardConfig = {
   AUTOMATED_JOB_DISPATCH: 0.50,
 };
 
+export type ClientStatus = 'active' | 'inactive' | 'vip';
+
 export interface Customer {
   id: string;
   tenant_id: string;
   full_name: string;
+  name?: string; // alias for full_name
   phone: string;
+  phone_number?: string; // alias for phone (linked with WhatsApp identity)
   email: string;
-  service_interest: string;
+  service_interest?: string;
+  status?: ClientStatus;
   notes?: string;
+  total_bookings?: number;
+  total_completed_visits?: number;
+  last_interacted_at?: any; // WhatsApp chat timestamp
   created_at: any;
 }
+
+export type Client = Customer;
+
+export type BookingStatus =
+  | 'CONFIRMED'
+  | 'PENDING'
+  | 'COMPLETED'
+  | 'ATTENDED'
+  | 'CANCELLED'
+  | 'NO_SHOW';
+
+export type BookingSource = 'whatsapp_bot' | 'admin_manual';
 
 export interface Appointment {
   id: string;
   tenant_id: string;
   customer_id?: string;
+  client_id?: string; // alias for customer_id
   customer_name: string;
+  client_name?: string; // alias for customer_name
   customer_phone: string;
+  client_phone?: string; // alias for customer_phone
   service_name: string;
-  date: string;
-  time: string;
-  status: 'CONFIRMED' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
+  date: string; // YYYY-MM-DD
+  time: string; // e.g. "11:00 AM"
+  scheduled_at?: string; // ISO string / timestamp
+  duration_minutes?: number;
+  status: BookingStatus;
+  booking_source?: BookingSource;
   notes?: string;
   created_at: any;
+  updated_at?: any;
 }
+
+export type Booking = Appointment;
 
 export interface MediaFile {
   id: string;
@@ -149,7 +209,7 @@ export interface MediaFile {
   file_type: string;
   file_size_mb: number;
   url: string;
-  category: 'CLINIC_XRAY' | 'PORTFOLIO_IMAGE' | 'CONSENT_FORM' | 'OTHER';
+  category: 'DOCUMENT' | 'PORTFOLIO_IMAGE' | 'CONTRACT' | 'OTHER' | 'CLINIC_XRAY' | 'CONSENT_FORM';
   credits_metered: number;
   uploaded_at: any;
 }
@@ -175,7 +235,8 @@ export type FlowNodeType =
   | 'CONDITION'
   | 'BACKEND_ACTION'
   | 'TERMINAL'
-  | 'SUPPORT_HELPDESK';
+  | 'SUPPORT_HELPDESK'
+  | 'SLOT_BOOKING';
 
 export interface TriggerNodeData {
   keywords: string[];
@@ -274,6 +335,42 @@ export interface ConsultantSelectionNodeData {
   variableName: string;
 }
 
+export type BookingSlotStatus = 'available' | 'booked';
+
+export interface BookingSlotDoc {
+  id: string; // e.g. "slot-10-00-am"
+  time: string; // e.g. "10:00 AM"
+  status: BookingSlotStatus;
+  booked_by: string | null; // customer phone / identifier
+  booked_at: string | null; // ISO timestamp
+  customer_name?: string;
+  service?: string;
+  created_at?: number;
+}
+
+export interface BookingDateDoc {
+  date: string; // "YYYY-MM-DD"
+  tenant_id: string;
+  total_slots?: number;
+  available_slots?: number;
+  updated_at: number;
+}
+
+export interface BookSlotResult {
+  success: boolean;
+  reason?: 'SLOT_ALREADY_TAKEN' | 'SLOT_NOT_FOUND' | 'TRANSACTION_FAILED';
+  slotData?: BookingSlotDoc;
+  bookingId?: string;
+  message?: string;
+}
+
+export interface NextAvailableDateResult {
+  date: string; // "YYYY-MM-DD"
+  formattedDate: string;
+  earliestSlot: BookingSlotDoc;
+  availableCount: number;
+}
+
 export interface SlotBookingNodeData {
   prompt: string;
   workingHoursStart?: string;
@@ -281,6 +378,8 @@ export interface SlotBookingNodeData {
   slotDurationMinutes?: number;
   holidays?: string[];
   variableName: string;
+  defaultSlotTimes?: string[];
+  autoFallbackNextDate?: boolean;
 }
 
 export type NodeDataPayload =

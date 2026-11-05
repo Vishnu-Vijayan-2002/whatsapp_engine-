@@ -12,12 +12,14 @@ import BusinessAdminLogin from './pages/Auth/BusinessAdminLogin';
 import SuperAdminOverview from './pages/SuperAdmin/Overview';
 import SuperAdminTenants from './pages/SuperAdmin/Tenants';
 import SuperAdminRateCard from './pages/SuperAdmin/RateCard';
+import SuperAdminCreditRequests from './pages/SuperAdmin/CreditRequests';
 
 // Business Admin Pages
 import BusinessDashboard from './pages/BusinessAdmin/Dashboard';
 import CustomersPage from './pages/BusinessAdmin/Customers';
 import MediaPage from './pages/BusinessAdmin/Media';
 import WhatsAppAutomationPage from './pages/BusinessAdmin/WhatsAppAutomation';
+import SettingsPage from './pages/BusinessAdmin/Settings';
 
 const RootRedirect: React.FC = () => {
   const { currentUser, loading } = useAuth();
@@ -81,6 +83,14 @@ const AppRoutes: React.FC = () => {
           </SuperAdminGuard>
         }
       />
+      <Route
+        path="/super-admin/credit-requests"
+        element={
+          <SuperAdminGuard>
+            <SuperAdminCreditRequests />
+          </SuperAdminGuard>
+        }
+      />
       <Route path="/super-admin" element={<Navigate to="/super-admin/dashboard" replace />} />
       <Route path="/super/*" element={<Navigate to="/super-admin/dashboard" replace />} />
 
@@ -117,6 +127,14 @@ const AppRoutes: React.FC = () => {
           </BusinessAdminGuard>
         }
       />
+      <Route
+        path="/app/settings"
+        element={
+          <BusinessAdminGuard>
+            <SettingsPage />
+          </BusinessAdminGuard>
+        }
+      />
       <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
 
       {/* Legacy /admin/* Aliases for Business Portal */}
@@ -149,6 +167,14 @@ const AppRoutes: React.FC = () => {
         element={
           <BusinessAdminGuard>
             <WhatsAppAutomationPage />
+          </BusinessAdminGuard>
+        }
+      />
+      <Route
+        path="/admin/settings"
+        element={
+          <BusinessAdminGuard>
+            <SettingsPage />
           </BusinessAdminGuard>
         }
       />

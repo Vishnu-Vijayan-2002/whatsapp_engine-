@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { FlowNode, FlowEdge, FlowNodeType, WhatsAppNodeFlow } from '../../types';
+import { DEFAULT_BOOKING_SLOT_TIMES } from '../../firebase/firestoreService';
 import './NodeCanvas.css';
 
 interface NodeCanvasProps {
@@ -234,6 +235,18 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
           variableName: 'support_action',
         };
         break;
+      case 'SLOT_BOOKING':
+        defaultTitle = 'Slot Booking (Anti-Double-Booking)';
+        defaultData = {
+          prompt: 'Please select an available appointment slot for {{service_name}}:',
+          variableName: 'appointment_slot',
+          workingHoursStart: '09:00 AM',
+          workingHoursEnd: '05:00 PM',
+          slotDurationMinutes: 60,
+          defaultSlotTimes: [...DEFAULT_BOOKING_SLOT_TIMES],
+          autoFallbackNextDate: true,
+        };
+        break;
     }
 
     const newNode: FlowNode = {
@@ -331,13 +344,17 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
     onChange({ ...flow, nodes: updatedNodes });
   };
 
+  const getCleanOptions = (raw: any): string[] => {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') return raw.split(',').map((s) => s.trim()).filter(Boolean);
+    return [];
+  };
+
   // Option item addition
   const handleAddOption = (nodeId: string) => {
     const node = flow.nodes.find((n) => n.id === nodeId);
     if (!node) return;
-    const currentOptions: string[] = Array.isArray((node.data as any)?.options)
-      ? [...(node.data as any).options]
-      : [];
+    const currentOptions = getCleanOptions((node.data as any)?.options);
     const newOpt = `Option ${currentOptions.length + 1}`;
     const updatedOptions = [...currentOptions, newOpt];
 
@@ -358,9 +375,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
   const handleDeleteOption = (nodeId: string, optIndex: number, optValue: string) => {
     const node = flow.nodes.find((n) => n.id === nodeId);
     if (!node) return;
-    const currentOptions: string[] = Array.isArray((node.data as any)?.options)
-      ? [...(node.data as any).options]
-      : [];
+    const currentOptions = getCleanOptions((node.data as any)?.options);
     const updatedOptions = currentOptions.filter((_, i) => i !== optIndex);
 
     // If node also has services, keep them in sync
@@ -395,9 +410,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
   const handleUpdateOption = (nodeId: string, optIndex: number, newValue: string) => {
     const node = flow.nodes.find((n) => n.id === nodeId);
     if (!node) return;
-    const currentOptions: string[] = Array.isArray((node.data as any)?.options)
-      ? [...(node.data as any).options]
-      : [];
+    const currentOptions = [...getCleanOptions((node.data as any)?.options)];
     const oldOpt = currentOptions[optIndex];
     currentOptions[optIndex] = newValue;
 
@@ -613,6 +626,9 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
         <button type="button" className="palette-btn support" onClick={() => handleAddNode('SUPPORT_HELPDESK')} title="Add Customer Support & Helpdesk Node">
           🎧 Support
         </button>
+        <button type="button" className="palette-btn slot-booking" onClick={() => handleAddNode('SLOT_BOOKING')} title="Add Dynamic Slot Booking Node (Anti-Double-Booking)">
+          📅 Slot Booking
+        </button>
         <button type="button" className="palette-btn terminal" onClick={() => handleAddNode('TERMINAL')} title="Add Final Confirmation Receipt">
           🏁 Completion
         </button>
@@ -765,6 +781,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
                     {node.type === 'CONDITION' && '🔀'}
                     {node.type === 'BACKEND_ACTION' && '⚡'}
                     {node.type === 'SUPPORT_HELPDESK' && '🎧'}
+                    {node.type === 'SLOT_BOOKING' && '📅'}
                     {node.type === 'TERMINAL' && '🏁'}
                   </span>
                   <span>{node.title}</span>
@@ -901,7 +918,18 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
                         <select
                           className="node-input-sm"
                           value={data.inputType || 'text'}
-                          onChange={(e) => handleUpdateNodeData(node.id, { inputType: e.target.value })}
+                          onChange={(e) => {
+                            const newType = e.target.value;
+                            const current = getCleanOptions(data.options);
+                            const nextOptions =
+                              newType === 'choice' && current.length === 0
+                                ? ['Option 1', 'Option 2']
+                                : current;
+                            handleUpdateNodeData(node.id, {
+                              inputType: newType,
+                              ...(newType === 'choice' ? { options: nextOptions } : {}),
+                            });
+                          }}
                         >
                           <option value="text">Text Response</option>
                           <option value="choice">Quick Choices (Buttons)</option>
@@ -910,6 +938,48 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
                         </select>
                       </div>
                     </div>
+
+                    {/* Dynamic Choices / Options List with Add, Edit, Delete */}
+                    {(data.inputType === 'choice' || getCleanOptions(data.options).length > 0) && (
+                      <div style={{ marginTop: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span className="node-field-label" style={{ margin: 0 }}>
+                            Choices / Options ({getCleanOptions(data.options).length})
+                          </span>
+                          <button
+                            type="button"
+                            className="node-add-subitem-btn"
+                            onClick={() => handleAddOption(node.id)}
+                            title="Add interactive choice option"
+                          >
+                            + Add Option
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {getCleanOptions(data.options).map((opt: string, idx: number) => (
+                            <div key={idx} style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              <input
+                                type="text"
+                                className="node-input-sm"
+                                style={{ flex: 1 }}
+                                value={opt}
+                                placeholder={`Option ${idx + 1}`}
+                                title="Edit option name"
+                                onChange={(e) => handleUpdateOption(node.id, idx, e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="node-del-subitem-btn"
+                                title={`Delete "${opt}"`}
+                                onClick={() => handleDeleteOption(node.id, idx, opt)}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1108,6 +1178,125 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({ flow, onChange, onSelect
                             </button>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 7. SLOT BOOKING NODE */}
+                {node.type === 'SLOT_BOOKING' && (
+                  <div>
+                    <span className="node-field-label">Target Variable</span>
+                    <input
+                      type="text"
+                      className="node-input-sm"
+                      style={{ marginBottom: '6px' }}
+                      value={data.variableName || 'appointment_slot'}
+                      placeholder="e.g. appointment_slot"
+                      onChange={(e) => handleUpdateNodeData(node.id, { variableName: e.target.value })}
+                    />
+
+                    <span className="node-field-label">WhatsApp In-Chat Prompt</span>
+                    <textarea
+                      className="node-textarea-sm"
+                      rows={2}
+                      value={data.prompt || ''}
+                      placeholder="Please select an available appointment slot for {{service_name}}:"
+                      onChange={(e) => handleUpdateNodeData(node.id, { prompt: e.target.value })}
+                    />
+
+                    <div style={{ marginTop: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span className="node-field-label" style={{ margin: 0 }}>
+                          Available Time Slots ({(Array.isArray(data.defaultSlotTimes) ? data.defaultSlotTimes : ['09:00 AM', '10:30 AM', '01:00 PM', '02:30 PM', '04:00 PM']).length})
+                        </span>
+                        <button
+                          type="button"
+                          className="node-add-subitem-btn"
+                          onClick={() => {
+                            const current = Array.isArray(data.defaultSlotTimes)
+                              ? [...data.defaultSlotTimes]
+                              : ['09:00 AM', '10:30 AM', '01:00 PM', '02:30 PM', '04:00 PM'];
+                            handleUpdateNodeData(node.id, { defaultSlotTimes: [...current, '05:00 PM'] });
+                          }}
+                          title="Add new time slot"
+                        >
+                          + Add Slot
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {(Array.isArray(data.defaultSlotTimes)
+                          ? data.defaultSlotTimes
+                          : ['09:00 AM', '10:30 AM', '01:00 PM', '02:30 PM', '04:00 PM']
+                        ).map((slot: string, idx: number) => (
+                          <div key={idx} style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              className="node-input-sm"
+                              style={{ flex: 1 }}
+                              value={slot}
+                              placeholder="e.g. 10:00 AM"
+                              title="Edit time slot"
+                              onChange={(e) => {
+                                const current = Array.isArray(data.defaultSlotTimes)
+                                  ? [...data.defaultSlotTimes]
+                                  : ['09:00 AM', '10:30 AM', '01:00 PM', '02:30 PM', '04:00 PM'];
+                                current[idx] = e.target.value;
+                                handleUpdateNodeData(node.id, { defaultSlotTimes: current });
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="node-del-subitem-btn"
+                              title={`Delete slot "${slot}"`}
+                              onClick={() => {
+                                const current = Array.isArray(data.defaultSlotTimes)
+                                  ? [...data.defaultSlotTimes]
+                                  : ['09:00 AM', '10:30 AM', '01:00 PM', '02:30 PM', '04:00 PM'];
+                                const updated = current.filter((_, i) => i !== idx);
+                                handleUpdateNodeData(node.id, { defaultSlotTimes: updated });
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={data.autoFallbackNextDate !== false}
+                          onChange={(e) => handleUpdateNodeData(node.id, { autoFallbackNextDate: e.target.checked })}
+                        />
+                        Auto-suggest next available date if 0 slots left
+                      </label>
+                    </div>
+
+                    <div style={{ marginTop: '6px', display: 'flex', gap: '6px' }}>
+                      <div style={{ flex: 1 }}>
+                        <span className="node-field-label">Working Hours</span>
+                        <input
+                          type="text"
+                          className="node-input-sm"
+                          value={`${data.workingHoursStart || '09:00 AM'} - ${data.workingHoursEnd || '05:00 PM'}`}
+                          placeholder="09:00 AM - 05:00 PM"
+                          onChange={(e) => {
+                            const [start, end] = e.target.value.split('-').map((s) => s.trim());
+                            handleUpdateNodeData(node.id, { workingHoursStart: start || '09:00 AM', workingHoursEnd: end || '05:00 PM' });
+                          }}
+                        />
+                      </div>
+                      <div style={{ width: '90px' }}>
+                        <span className="node-field-label">Duration</span>
+                        <input
+                          type="number"
+                          className="node-input-sm"
+                          value={data.slotDurationMinutes || 60}
+                          onChange={(e) => handleUpdateNodeData(node.id, { slotDurationMinutes: Number(e.target.value) || 60 })}
+                        />
                       </div>
                     </div>
                   </div>
