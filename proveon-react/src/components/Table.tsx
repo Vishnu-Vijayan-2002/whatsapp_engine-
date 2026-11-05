@@ -1,6 +1,3 @@
-import React from 'react';
-import './Table.css';
-
 type TableProps<T> = {
   columns: { header: string; accessor: keyof T }[];
   data: T[];

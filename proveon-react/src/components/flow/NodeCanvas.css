@@ -1,0 +1,596 @@
+/* ==========================================================================
+   Node-Based Visual Flow Builder Canvas Styles
+   ========================================================================== */
+
+.flow-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 680px;
+  background-color: var(--bg-card);
+  background-image: 
+    radial-gradient(var(--border-color) 1.2px, transparent 1.2px);
+  background-size: 24px 24px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  user-select: none;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .flow-canvas-container {
+  background-color: #161922;
+  background-image: radial-gradient(#2d3346 1.2px, transparent 1.2px);
+}
+
+.flow-canvas-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.flow-canvas-viewport.panning {
+  cursor: grabbing;
+}
+
+.flow-canvas-inner {
+  position: absolute;
+  transform-origin: 0 0;
+  width: 5000px;
+  height: 5000px;
+  pointer-events: none;
+}
+
+.flow-svg-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.flow-edge-path {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke 0.2s, stroke-width 0.2s;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.flow-edge-path:hover {
+  stroke: #2563EB;
+  stroke-width: 5;
+}
+
+.flow-edge-path.true-branch {
+  stroke: #10B981;
+}
+
+.flow-edge-path.false-branch {
+  stroke: #EF4444;
+}
+
+/* Floating Toolbar / Palette */
+.flow-palette-bar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 40;
+  flex-wrap: wrap;
+}
+
+.palette-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  border: 1px solid transparent;
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  pointer-events: auto;
+}
+
+.palette-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary-border);
+  transform: translateY(-1px);
+}
+
+.palette-btn.trigger {
+  color: #3B82F6;
+}
+.palette-btn.message {
+  color: #10B981;
+}
+.palette-btn.input {
+  color: #F59E0B;
+}
+.palette-btn.condition {
+  color: #8B5CF6;
+}
+.palette-btn.action {
+  color: #EC4899;
+}
+.palette-btn.support {
+  color: #0284C7;
+}
+.palette-btn.terminal {
+  color: #14B8A6;
+}
+
+/* Zoom / Canvas Controls */
+.flow-canvas-controls {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  gap: 4px;
+  z-index: 40;
+}
+
+.canvas-control-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  pointer-events: auto;
+}
+
+.canvas-control-btn:hover {
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+
+/* Node Cards */
+.flow-node-card {
+  position: absolute;
+  width: 290px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  pointer-events: auto;
+  z-index: 20;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+
+.flow-node-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(72, 128, 255, 0.3), 0 15px 30px rgba(0, 0, 0, 0.15);
+  z-index: 30;
+}
+
+.flow-node-card:hover {
+  box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.15);
+}
+
+/* Color Coded Headers */
+.node-header {
+  padding: 12px 14px;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: grab;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.2px;
+}
+
+.node-header:active {
+  cursor: grabbing;
+}
+
+.flow-node-card.type-TRIGGER .node-header {
+  background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
+}
+
+.flow-node-card.type-MESSAGE .node-header {
+  background: linear-gradient(135deg, #059669 0%, #10B981 100%);
+}
+
+.flow-node-card.type-USER_INPUT .node-header {
+  background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%);
+}
+
+.flow-node-card.type-CONDITION .node-header {
+  background: linear-gradient(135deg, #7C3AED 0%, #8B5CF6 100%);
+}
+
+.flow-node-card.type-BACKEND_ACTION .node-header {
+  background: linear-gradient(135deg, #DB2777 0%, #EC4899 100%);
+}
+
+.flow-node-card.type-SUPPORT_HELPDESK .node-header {
+  background: linear-gradient(135deg, #0284C7 0%, #38BDF8 100%);
+}
+
+.flow-node-card.type-TERMINAL .node-header {
+  background: linear-gradient(135deg, #0D9488 0%, #14B8A6 100%);
+}
+
+.node-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-action-icon-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.node-action-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* Node Body Content */
+.node-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-main);
+  background: var(--bg-card);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.node-field-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.node-input-sm {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 12.5px;
+  color: var(--text-main);
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.node-input-sm:focus {
+  border-color: var(--primary);
+}
+
+.node-variable-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #D97706;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.node-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
+/* Handle Ports */
+.node-port-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--primary);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+  cursor: crosshair;
+  z-index: 25;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.node-port-handle:hover {
+  transform: scale(1.3);
+  background: var(--primary);
+}
+
+.node-port-handle.input {
+  left: -7px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.node-port-handle.input:hover {
+  transform: translateY(-50%) scale(1.3);
+}
+
+.node-port-handle.output {
+  right: -7px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.node-port-handle.output:hover {
+  transform: translateY(-50%) scale(1.3);
+}
+
+.node-port-handle.output-true {
+  right: -7px;
+  top: 36%;
+  border-color: #10B981;
+}
+
+.node-port-handle.output-false {
+  right: -7px;
+  top: 72%;
+  border-color: #EF4444;
+}
+
+.node-port-handle.multi-branch-port {
+  right: -7px;
+  background: var(--bg-card);
+  border: 2px solid #00A884;
+}
+
+.node-port-handle.multi-branch-port:hover {
+  background: #00A884;
+  transform: scale(1.3);
+}
+
+.node-port-handle.multi-branch-port.connecting-source {
+  background: #00A884 !important;
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 4px rgba(0, 168, 132, 0.45);
+  transform: scale(1.35) !important;
+}
+
+.port-label.multi-branch-label {
+  position: absolute;
+  right: 12px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #00A884;
+  background: rgba(0, 168, 132, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 168, 132, 0.2);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Connecting Active & Target Candidate Highlights */
+.node-port-handle.connecting-source {
+  background: #10B981 !important;
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.45);
+  transform: translateY(-50%) scale(1.35) !important;
+}
+
+.node-port-handle.target-candidate {
+  background: #3B82F6 !important;
+  border-color: #1D4ED8 !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.45);
+  animation: pulse-ring 1.3s infinite ease-in-out;
+}
+
+@keyframes pulse-ring {
+  0% { transform: translateY(-50%) scale(1); }
+  50% { transform: translateY(-50%) scale(1.4); }
+  100% { transform: translateY(-50%) scale(1); }
+}
+
+.connecting-banner-pill {
+  position: absolute;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0F172A;
+  color: #F8FAFC;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 50;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  border: 1px solid #334155;
+  animation: modal-fade-in 0.2s ease;
+  pointer-events: auto;
+}
+
+.connecting-cancel-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #FCA5A5;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.connecting-cancel-btn:hover {
+  background: #EF4444;
+  color: #fff;
+}
+
+.node-connect-dropdown-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.port-label {
+  position: absolute;
+  right: 12px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.port-label.true-label {
+  top: 32%;
+  color: #10B981;
+}
+.port-label.false-label {
+  top: 68%;
+  color: #EF4444;
+}
+
+/* Submissions Table & Dashboard Card */
+.flow-submissions-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.flow-submission-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.flow-submission-status-badge.executed {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.rule-engine-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #4F46E5;
+}
+
+/* Option & Service Management Controls */
+.node-add-subitem-btn {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.node-add-subitem-btn:hover {
+  background: #10B981;
+  color: #ffffff;
+}
+
+.node-del-subitem-btn {
+  background: transparent;
+  color: #94A3B8;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.node-del-subitem-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #EF4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.node-service-item-row {
+  display: grid;
+  grid-template-columns: 1fr 65px 50px 24px;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+

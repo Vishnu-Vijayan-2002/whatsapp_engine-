@@ -1,3 +1,5 @@
+/* DashStack-inspired Modern Admin Sidebar System */
+
 .dash-sidebar {
   width: 250px;
   background: var(--bg-sidebar);
@@ -5,27 +7,40 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.3s ease;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s ease;
   z-index: 101;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  box-shadow: 1px 0 10px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
 }
 
+/* Collapsed state */
 .dash-sidebar.collapsed {
   width: 76px;
 }
 
+/* Brand logo & title */
 .dash-brand {
   height: 70px;
+  min-height: 70px;
   display: flex;
   align-items: center;
   padding: 0 24px;
-  gap: 8px;
+  gap: 10px;
   border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
 }
 
 .brand-logo-text {
   font-size: 22px;
   font-weight: 900;
   letter-spacing: -0.5px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .brand-dash {
@@ -41,26 +56,53 @@
   font-weight: 800;
   background: var(--primary-light);
   color: var(--primary);
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
   letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
+/* Scroll area for navigation */
 .sidebar-scroll-area {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
 }
 
+.sidebar-scroll-area::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+
+[data-theme="dark"] .sidebar-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Section titles */
 .sidebar-group-title {
   font-size: 11px;
   font-weight: 800;
   color: var(--text-muted);
   letter-spacing: 0.8px;
-  padding: 12px 14px 6px;
-  margin-top: 6px;
+  padding: 14px 14px 8px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
+/* Nav list */
 .sidebar-nav-list {
   list-style: none;
   padding: 0;
@@ -70,25 +112,40 @@
   gap: 4px;
 }
 
+.sidebar-nav-list li {
+  list-style: none;
+  width: 100%;
+}
+
+/* Links & buttons */
 .sidebar-link {
   display: flex;
   align-items: center;
-  padding: 11px 16px;
+  padding: 12px 16px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  text-decoration: none;
+  text-decoration: none !important;
   font-size: 14px;
   font-weight: 600;
   transition: all 0.2s ease;
   position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
 }
 
 .sidebar-link:hover {
   background: var(--bg-input);
   color: var(--text-main);
+  text-decoration: none !important;
 }
 
-/* Active DashStack tab highlight (filled blue with white text and icon) */
+/* Active Highlight */
 .sidebar-link.active {
   background: var(--primary);
   color: #FFFFFF !important;
@@ -97,11 +154,23 @@
 }
 
 .sidebar-link.active .sidebar-icon {
-  color: #FFFFFF;
+  color: #FFFFFF !important;
+}
+
+/* Super Admin Active Accent (Crimson Red) */
+.dash-sidebar.super-admin .sidebar-link.active {
+  background: #EF4444;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+}
+
+.dash-sidebar.super-admin .sidebar-link.active .sidebar-icon {
+  color: #FFFFFF !important;
 }
 
 .sidebar-icon {
-  width: 24px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -111,13 +180,24 @@
   transition: color 0.2s;
 }
 
+.sidebar-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
 .sidebar-link:hover .sidebar-icon {
   color: var(--primary);
+}
+
+.dash-sidebar.super-admin .sidebar-link:hover .sidebar-icon {
+  color: #EF4444;
 }
 
 .sidebar-text {
   flex: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-pill {
@@ -127,6 +207,8 @@
   border-radius: var(--radius-full);
   background: var(--bg-input);
   color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-pill.blue {
@@ -139,11 +221,26 @@
   color: #FFFFFF;
 }
 
+/* Logout action styling */
+.sidebar-link.logout-btn {
+  color: #EF4444;
+}
+
+.sidebar-link.logout-btn:hover {
+  background: rgba(239, 68, 68, 0.08);
+  color: #DC2626 !important;
+}
+
+.sidebar-link.logout-btn .sidebar-icon {
+  color: #EF4444;
+}
+
+/* Collapsed behaviors */
 .dash-sidebar.collapsed .sidebar-text,
 .dash-sidebar.collapsed .nav-pill,
 .dash-sidebar.collapsed .sidebar-group-title,
 .dash-sidebar.collapsed .brand-badge {
-  display: none;
+  display: none !important;
 }
 
 .dash-sidebar.collapsed .dash-brand {
@@ -158,4 +255,20 @@
 
 .dash-sidebar.collapsed .sidebar-icon {
   margin-right: 0;
+}
+
+/* Mobile responsive drawer */
+@media (max-width: 900px) {
+  .dash-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.15);
+  }
+
+  .dash-sidebar.collapsed {
+    transform: translateX(-100%);
+    width: 250px;
+  }
 }

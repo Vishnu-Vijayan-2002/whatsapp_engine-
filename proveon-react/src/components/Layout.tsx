@@ -1,10 +1,10 @@
-import React, { useContext, useState } from 'react';
-import { RoleContext } from '../context/RoleContext';
+import React, { useState } from 'react';
+import { useRole } from '../context/RoleContext';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const role = useContext(RoleContext);
+  const { role } = useRole();
   const [collapsed, setCollapsed] = useState(false);
 
   return (

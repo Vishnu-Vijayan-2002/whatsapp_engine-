@@ -1,4 +1,7 @@
 /* DashStack-inspired Modern Admin Design System */
+@import '../components/Sidebar.css';
+@import '../components/Header.css';
+
 :root {
   /* Brand / Primary */
   --primary: #4880FF;
